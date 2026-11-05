@@ -12,7 +12,7 @@ const EXPECT = {
                 /back to 강의채널 label: 1\.5x/, /after off: like= inline endcard= block/, /errors: \[\]/],
   pw_phase3: [/gear label: 🌙 영상 끝/, /SB refetch cats: \["selfpromo"/, /sleep end → cmds: 1 pause \| gear after: ⚙/,
               /double-tap cmds: .*seek:90.*seek:110/, /web fs double-tap: left→ 90 \| right x2→ 110 \| middle exits fs: true → false/, /errors: \[\]/],
-  pw_phase4: [/✓ 광고 일정 1건 제거/, /✓ 원래 음성으로 바꿈/, /✓ 자막 켬: 한국어/, /✓ 화면 구조 정상/, /버전 2026\.11\.05\.6/,
+  pw_phase4: [/✓ 광고 일정 1건 제거/, /✓ 원래 음성으로 바꿈/, /✓ 자막 켬: 한국어/, /✓ 화면 구조 정상/, /버전 2026\.11\.05\.7/,
               /shorts link click → \/watch\?v=SHORTSID001/, /open shorts URL → \/watch\?v=SHORTSID002/,
               /✓ 실드 켜짐 · 막은 광고 창·이동 1번/, /지운 광고 1개/, /dark after off: false/, /open from 🚫 bar event: true/, /errors: \[\]/],
   pw_swipeback: [/short drag 80px: .*after: \/watch \| transform none/, /sideways drag: .*still \/watch/, /long drag 320px: .*after: \/ \| home visible: true/, /errors: \[\]/],
@@ -40,6 +40,14 @@ const EXPECT = {
 };
 
 let failed = 0;
+// 업데이트용 .meta.js가 .user.js 머리말과 같은지 (버전을 바꾸고 tools/make-meta.js를 안 돌린 경우 잡기)
+const fs = require('fs');
+for (const f of fs.readdirSync(path.join(__dirname, '../src')).filter(n => n.endsWith('.user.js'))) {
+  const head = (fs.readFileSync(path.join(__dirname, '../src', f), 'utf8').match(/\/\/ ==UserScript==[\s\S]*?\/\/ ==\/UserScript==\n/) || [''])[0];
+  const metaPath = path.join(__dirname, '../src', f.replace('.user.js', '.meta.js'));
+  const ok = fs.existsSync(metaPath) && fs.readFileSync(metaPath, 'utf8') === head;
+  if (!ok) { failed++; console.log(`✗ ${f}: .meta.js가 없거나 머리말과 다름 → node tools/make-meta.js`); } else console.log(`✓ ${f} 머리말 = .meta.js`);
+}
 for (const [name, checks] of Object.entries(EXPECT)) {
   let out = '';
   try {
