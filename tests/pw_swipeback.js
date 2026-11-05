@@ -1,0 +1,21 @@
+const { chromium } = require('playwright'); const fs=require('fs'); const path=require('path');
+const SRC=require('path').join(__dirname,'../src/'); const S=n=>fs.readFileSync(path.join(SRC,n),'utf8');
+(async()=>{const b=await chromium.launch(); const ctx=await b.newContext({viewport:{width:390,height:844},hasTouch:true,isMobile:true}); const p=await ctx.newPage(); const errs=[]; p.on('pageerror',e=>errs.push(e.message));
+ await ctx.route('**/*',r=>{const u=r.request().url(); if(u.includes('sponsor')) return r.fulfill({contentType:'application/json',headers:{'access-control-allow-origin':'*'},body:'[]'});
+  const watch=u.includes('/watch'); return r.fulfill({contentType:'text/html',body:`<meta name=viewport content="width=device-width,initial-scale=1"><body style="margin:0"><ytm-app style="display:block">${watch?'<div id=movie_player style="position:sticky;top:0;width:390px;height:220px;background:#000"><video style="width:390px;height:220px"></video></div>':'<h1 id=home>HOME LIST</h1>'}<p style="height:3000px">content</p></ytm-app></body>`});});
+ await p.goto('https://m.youtube.com/'); await p.goto('https://m.youtube.com/watch?v=abcdefghijk');
+ await p.evaluate(S('yt-main.user.js')); await p.waitForTimeout(800);
+ const cdp=await ctx.newCDPSession(p);
+ const drag=async (pts)=>{await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:pts[0][0],y:pts[0][1]}]});
+   for(const [x,y] of pts.slice(1)){await cdp.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x,y}]}); await p.waitForTimeout(16);}
+   const mid=await p.evaluate(()=>{const a=document.querySelector('ytm-app');return a?a.style.transform+' op='+a.style.opacity:''});
+   await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]}); return mid;};
+ const steps=(x,y0,y1,n=12)=>Array.from({length:n+1},(_,i)=>[x,y0+(y1-y0)*i/n]);
+ let mid=await drag(steps(200,100,180)); await p.waitForTimeout(400);
+ console.log('short drag 80px: mid', mid, '| after:', new URL(p.url()).pathname, '| transform', await p.evaluate(()=>document.querySelector('ytm-app').style.transform||'none'));
+ mid=await drag(Array.from({length:13},(_,i)=>[200+i*15,100+i*2])); await p.waitForTimeout(300);
+ console.log('sideways drag: mid', JSON.stringify(mid), '| still', new URL(p.url()).pathname);
+ mid=await drag(steps(200,100,420)); await p.waitForTimeout(900);
+ console.log('long drag 320px: mid', mid, '| after:', new URL(p.url()).pathname, '| home visible:', await p.evaluate(()=>!!document.getElementById('home')));
+ console.log('errors:', errs);
+ await b.close();})();

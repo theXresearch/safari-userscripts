@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YT Main
 // @namespace    https://github.com/theXresearch/safari-userscripts
-// @version      2026.11.05.4
+// @version      2026.11.05.5
 // @author       theXresearch
 // @updateURL    https://raw.githubusercontent.com/theXresearch/safari-userscripts/main/src/yt-main.user.js
 // @downloadURL  https://raw.githubusercontent.com/theXresearch/safari-userscripts/main/src/yt-main.user.js
@@ -41,9 +41,9 @@
   const loadJson = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) || d; } catch (e) { return d; } };
 
   // ================= 설정 (⚙ 버튼으로 켜고 끔, yt-page도 같은 값을 읽음) =================
-  const VERSION = '2026.11.05.4';   // 위 @version과 같게 (⚙ 작동 상태에 표시)
+  const VERSION = '2026.11.05.5';   // 위 @version과 같게 (⚙ 작동 상태에 표시)
   const SET = Object.assign({ prune: true, origAudio: true, sb: true, chanSpeed: true, fresh: true, rest: true, tidy: true, endCards: true,
-    shortsNormal: false, capLang: '', sbCats: SB_ALL.filter(c => c[2]).map(c => c[0]) }, loadJson('krSet', {}));
+    shortsNormal: false, swipeBack: true, capLang: '', sbCats: SB_ALL.filter(c => c[2]).map(c => c[0]) }, loadJson('krSet', {}));
   const saveSet = () => localStorage.setItem('krSet', JSON.stringify(SET));
   const applySet = () => {   // CSS로 처리하는 항목은 <html> 표시로 켜고 끔
     if (SET.tidy) html.dataset.krTidy = '1'; else delete html.dataset.krTidy;
@@ -787,6 +787,60 @@
     return find;
   })();
 
+  // ================= 11-2. 영상을 아래로 끌어내리면 이전 화면으로 (YouTube 앱 방식) =================
+  // 시청 화면(세로·맨 위)에서 영상을 잡고 아래로 끌면 화면 전체가 손가락을 따라 내려가며 흐려지고,
+  // 화면 높이의 1/4 이상 내리고 놓으면 아래로 사라지면서 이전 화면(보던 목록)으로 돌아감. 덜 내리면 제자리로.
+  // (iPhone Safari는 끄는 순간 페이지 스크롤로 가져가 손가락 신호를 끊어 버리므로, 아래로 끄는 것이 확실해지면
+  //  그 뒤 움직임은 직접 처리 — 예전 버전이 실제 폰에서 동작하지 않던 원인)
+  (() => {
+    let s = null;
+    const page = () => document.querySelector('ytm-app') || document.body;   // 화면 전체 (위치 고정된 플레이어까지 함께 움직이도록)
+    const reset = el => { el.style.removeProperty('transform'); el.style.removeProperty('opacity'); el.style.removeProperty('transition'); };
+    const scrollTop = () => Math.max(window.scrollY || 0, (document.scrollingElement || {}).scrollTop || 0);
+    document.addEventListener('touchstart', e => {
+      s = null;
+      if (!SET.swipeBack || e.touches.length !== 1 || !vidId() || isShorts() || pseudoFs.video() || landscape.matches) return;
+      const p = document.querySelector('#movie_player');
+      if (!p || !p.contains(e.target) || scrollTop() > 5) return;                 // 영상 위에서, 페이지 맨 위일 때만
+      const t = e.touches[0];
+      s = { x: t.clientX, y: t.clientY, dy: 0, on: false };
+    }, { capture: true, passive: true });
+    document.addEventListener('touchmove', e => {
+      if (!s || e.touches.length !== 1) return;
+      const t = e.touches[0], dx = t.clientX - s.x, dy = t.clientY - s.y;
+      if (!s.on) {
+        if (Math.hypot(dx, dy) < 12) return;
+        if (dy < 0 || Math.abs(dx) > dy * 0.7) { s = null; return; }             // 위로·옆으로 → 일반 동작
+        s.on = true;
+      }
+      e.preventDefault();                                                       // Safari가 스크롤로 가져가지 못하게
+      s.dy = Math.max(0, dy);
+      const el = page();
+      el.style.setProperty('transition', 'none', 'important');
+      el.style.setProperty('transform', `translateY(${s.dy}px)`, 'important');
+      el.style.setProperty('opacity', String(Math.max(0.35, 1 - s.dy / innerHeight)), 'important');
+    }, { capture: true, passive: false });
+    const end = () => {
+      if (!s || !s.on) { s = null; return; }
+      const el = page(), go = s.dy > innerHeight / 4;
+      s = null;
+      el.style.setProperty('transition', 'transform .22s ease-in, opacity .22s ease-in', 'important');
+      if (!go) { el.style.setProperty('transform', 'translateY(0)', 'important'); el.style.setProperty('opacity', '1', 'important'); setTimeout(() => reset(el), 260); return; }
+      el.style.setProperty('transform', `translateY(${innerHeight}px)`, 'important');
+      el.style.setProperty('opacity', '0', 'important');
+      const from = location.href;
+      setTimeout(() => {
+        if (history.length > 1) history.back(); else location.href = '/';         // 바로 들어온 영상이면 홈으로
+        // 이전 화면이 그려지면(주소가 바뀌면) 원래대로, 혹시 안 바뀌어도 1.5초 뒤 원래대로
+        const t0 = Date.now(), wait = setInterval(() => {
+          if (location.href !== from || Date.now() - t0 > 1500) { clearInterval(wait); reset(el); }
+        }, 50);
+      }, 200);
+    };
+    document.addEventListener('touchend', end, true);
+    document.addEventListener('touchcancel', end, true);   // Safari가 신호를 끊어도 놓은 것으로 처리
+  })();
+
   // ================= 메인 루프 (1초) — 확인 위주. 재생 위치에 따른 일(스폰서 건너뛰기·진행 막대)은 영상 시간 신호로 =================
   // 지금 보고 있는 영상: 전체화면 영상 > 재생 중인 영상 > 화면 가운데 영상 (Shorts)
   const activeVideo = () => {
@@ -1051,7 +1105,8 @@
     ['rest', '1시간 연속 재생 시 휴식', ''],
     ['tidy', '좋아요·댓글·채널 로고 숨김', '', true],
     ['endCards', '영상 위 추천·정보 카드 숨김', ''],
-    ['shortsNormal', 'Shorts를 일반 화면으로 열기', '속도·진행 막대·스폰서 건너뛰기를 Shorts에서도']
+    ['shortsNormal', 'Shorts를 일반 화면으로 열기', '속도·진행 막대·스폰서 건너뛰기를 Shorts에서도'],
+    ['swipeBack', '영상을 아래로 내려 이전 화면으로', 'YouTube 앱처럼 영상을 손가락으로 끌어내리면 보던 목록으로']
   ];
   // ----- 작동 상태 (⚙ 아래쪽): 보이지 않게 동작하는 기능이 실제로 되고 있는지 표시 -----
   // 문제가 생기면 이 화면 스크린샷 한 장으로 원인을 알 수 있게
