@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YT Main
 // @namespace    https://github.com/theXresearch/safari-userscripts
-// @version      2026.11.05.5
+// @version      2026.11.05.6
 // @author       theXresearch
 // @updateURL    https://raw.githubusercontent.com/theXresearch/safari-userscripts/main/src/yt-main.user.js
 // @downloadURL  https://raw.githubusercontent.com/theXresearch/safari-userscripts/main/src/yt-main.user.js
@@ -41,7 +41,7 @@
   const loadJson = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) || d; } catch (e) { return d; } };
 
   // ================= 설정 (⚙ 버튼으로 켜고 끔, yt-page도 같은 값을 읽음) =================
-  const VERSION = '2026.11.05.5';   // 위 @version과 같게 (⚙ 작동 상태에 표시)
+  const VERSION = '2026.11.05.6';   // 위 @version과 같게 (⚙ 작동 상태에 표시)
   const SET = Object.assign({ prune: true, origAudio: true, sb: true, chanSpeed: true, fresh: true, rest: true, tidy: true, endCards: true,
     shortsNormal: false, swipeBack: true, capLang: '', sbCats: SB_ALL.filter(c => c[2]).map(c => c[0]) }, loadJson('krSet', {}));
   const saveSet = () => localStorage.setItem('krSet', JSON.stringify(SET));
@@ -894,7 +894,7 @@
 
   // 버튼 묶음 위치 (영상·목록을 가리지 않게)
   //  · 시청 화면 = 영상 위 검은 상단 바 안 (로고는 ▶ 아이콘만 남겨 자리를 만듦, 아이콘을 누르면 홈)
-  //  · Shorts = 오른쪽 아래(세로) · 가로 전체화면 = 화면 오른쪽 위 · 홈·검색 목록 = 숨김
+  //  · Shorts = 오른쪽 아래(세로) · 가로 전체화면·홈·검색 목록 = 숨김
   const placeBar = () => {
     const bar = document.getElementById('kr-bar');
     if (!bar) return;
@@ -902,7 +902,7 @@
     const watch = !!vidId() && !isShorts() && !pseudoFs.video();
     if (watch) html.dataset.krWatch = '1'; else delete html.dataset.krWatch;   // 로고 줄이기(CSS)는 시청 화면에서만
     if (isShorts()) return set('display:flex;flex-direction:column;align-items:flex-end;right:6px;bottom:calc(84px + env(safe-area-inset-bottom));');
-    if (pseudoFs.video()) return set('display:flex;top:calc(8px + env(safe-area-inset-top));right:calc(8px + env(safe-area-inset-right));');
+    if (pseudoFs.video()) return set('display:none;');   // 가로 전체화면: 영상만 (버튼은 세로 화면에 있음, PiP는 두 손가락 톡)
     if (!vidId()) return set('display:none;');
     const head = document.querySelector('ytm-mobile-topbar-renderer, #header-bar'), logo = document.querySelector('ytm-home-logo');
     const hr = head && head.getBoundingClientRect(), lr = logo && logo.getBoundingClientRect();
