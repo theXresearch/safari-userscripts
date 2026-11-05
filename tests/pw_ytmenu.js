@@ -1,0 +1,16 @@
+const { chromium } = require('playwright'); const fs=require('fs');
+const S=n=>fs.readFileSync(require('path').join(__dirname,'../src/')+n,'utf8');
+(async()=>{const b=await chromium.launch(); const p=await b.newPage({viewport:{width:390,height:844}}); p.on('pageerror',e=>console.log('ERR',e.message));
+ await p.route('https://m.youtube.com/**',r=>r.fulfill({contentType:'text/html',body:`<body><ytm-mobile-topbar-renderer style="display:block;height:48px"><ytm-home-logo style="display:block;width:100px;height:24px"></ytm-home-logo></ytm-mobile-topbar-renderer><div id=movie_player><video></video></div></body>`}));
+ await p.goto('https://m.youtube.com/watch?v=abcdefghijk');
+ await p.evaluate(()=>{document.documentElement.dataset.krPage='1';document.documentElement.dataset.krQList='hd1080,hd720,large,medium,small,tiny';
+   document.addEventListener('kr-cmd',()=>{document.title=document.documentElement.dataset.krCmd+':'+(document.documentElement.dataset.krArg||'')+':'+localStorage.getItem('krQuality');});});
+ await p.evaluate(S('yt-main.user.js')); await p.waitForTimeout(1500);
+ console.log('buttons:', await p.evaluate(()=>[...document.querySelectorAll('#kr-bar button')].map(b=>b.textContent).join(',')));
+ await p.click('#kr-quality'); await p.waitForTimeout(200);
+ console.log('menu:', await p.evaluate(()=>[...document.querySelectorAll('#kr-menu button')].map(b=>b.textContent).join(' | ')));
+ await p.click('#kr-menu button:nth-child(3)'); await p.waitForTimeout(200);
+ console.log('after pick:', await p.title(), '| label', await p.textContent('#kr-quality'), '| pref', await p.evaluate(()=>localStorage.getItem('yt-player-quality')));
+ await p.click('#kr-speed'); await p.waitForTimeout(200);
+ console.log('speed menu:', await p.evaluate(()=>[...document.querySelectorAll('#kr-menu button')].map(b=>b.textContent).join(' | ')));
+ await b.close();})();

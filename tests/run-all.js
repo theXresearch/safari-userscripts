@@ -1,0 +1,47 @@
+// 모든 시험을 차례로 실행하고, 각 시험의 출력에 '기대하는 결과'가 들어 있는지 확인
+// 실행: node tests/run-all.js   (필요: npm i && npx playwright install chromium)
+const { execFileSync } = require('child_process');
+const path = require('path');
+
+// 시험 파일 → 출력에 반드시 있어야 하는 내용
+const EXPECT = {
+  // ── YouTube ──
+  pw_phase1: [/initial PR keys: videoDetails/, /fetch player pruned: \{"streamingData"/, /SB url uses prefix: true/,
+              /player log: audio en-orig \| play \| seek 20/, /marks on progress bar: 1/, /errors: \[\]/],
+  pw_ytmenu: [/menu: 자동 \| 1080p/, /after pick: quality::hd720/, /speed menu: .*✓ 1\.25x/],
+  pw_fetchdates: [/모은 게시일: \{"NEWVIDEO001":"2일 전"\}/],
+  pw_avatar: [/목록 로고: 숨김 \| 시청화면 채널 로고: 숨김 \| 영상 썸네일: 보임/],
+  pw_chipreal: [/내렸다 다시 올림: 제목 \d+ → 제목 보임/],
+  test_fsbar: [/막대 표시: 5:00 \/ 10:00/],
+  test_gesture: [/YouTube 이동 → 130초/, /밀기 직후 탭 → 조작 막대 안 뜸/],
+  test_fresh: [/저장 개수: 7/],
+  test_media: [/YT\.play, YT\.pause, YT\.next/, /화면 꺼짐 → 즉시 명령: 다음 영상/],
+  test_pip: [/다시 누름 → PiP→inline/],
+  // ── 일반 사이트 ──
+  pw_shield: [/shield on → url: https:\/\/missav\.test\/ popups: \[\]/, /real link → https:\/\/news\.example\.org/],
+  pw_all: [/cam video removed: true/, /landscape: player kw-fs/],
+  pw_cam: [/cams=0 camwrap=none preview=true/],
+  pw_hdr: [/quick rotate back: hdr:visible/],
+  pw_hdr2: [/hdr:block live:none m3u8:block/],
+  pw_m3u8: [/popup opened: \[ 'https:\/\/wiselife\.blog/, /navigated to: https:\/\/wiselife\.blog/],
+  pw_q: [/picked → label 480p plyr q=480/, /outside click closes: true/],
+  pw_bar: [/mode=flow/, /play handler survived: played/],
+  pw_ui: [/enter fs   : seek=none play=none tools=0/, /tap center : .*paused=true/, /portrait   : .*hdr=visible/],
+  pw_land: [/player kw-fs \| block/, /ad paused: true/],
+  pw_pop: [/after play: \[\]/, /after overlay: \[\]/]
+};
+
+let failed = 0;
+for (const [name, checks] of Object.entries(EXPECT)) {
+  let out = '';
+  try {
+    out = execFileSync(process.execPath, [path.join(__dirname, name + '.js')], { encoding: 'utf8', timeout: 120000, stdio: ['ignore', 'pipe', 'pipe'] });
+  } catch (e) { out = (e.stdout || '') + (e.stderr || '') + '\n' + e.message; }
+  const miss = checks.filter(re => !re.test(out));
+  if (miss.length) {
+    failed++;
+    console.log(`✗ ${name}\n   빠진 결과: ${miss.map(String).join(', ')}\n   출력:\n${out.split('\n').map(l => '     ' + l).join('\n')}`);
+  } else console.log(`✓ ${name}`);
+}
+console.log(failed ? `\n${failed}개 실패` : '\n전부 통과');
+process.exit(failed ? 1 : 0);
