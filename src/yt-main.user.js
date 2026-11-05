@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YT Main
 // @namespace    https://github.com/theXresearch/safari-userscripts
-// @version      2026.11.05.2
+// @version      2026.11.05.3
 // @author       theXresearch
 // @updateURL    https://raw.githubusercontent.com/theXresearch/safari-userscripts/main/src/yt-main.user.js
 // @downloadURL  https://raw.githubusercontent.com/theXresearch/safari-userscripts/main/src/yt-main.user.js
@@ -28,8 +28,9 @@
   const SPEEDS = [1, 1.25, 1.5, 1.75, 2];               // YouTube 자체 속도 값만 사용
   const QHEIGHT = { hd2160: 2160, hd1440: 1440, hd1080: 1080, hd720: 720, large: 480, medium: 360, small: 240, tiny: 144 };   // 높은 화질부터
   const QNAME = Object.assign({ auto: '자동' }, ...Object.entries(QHEIGHT).map(([k, v]) => ({ [k]: v + 'p' })));
-  // 스폰서 구간: 광고·자기 홍보·구독 요청·인트로·아웃트로·미리보기·음악 영상의 잡담
-  const SB_CATS = ['sponsor', 'selfpromo', 'interaction', 'intro', 'outro', 'preview', 'music_offtopic'];
+  // 스폰서 구간 범주 (⚙에서 각각 켜고 끔). [이름, 표시, 기본값]
+  const SB_ALL = [['sponsor', '광고', 1], ['selfpromo', '자기 홍보', 1], ['interaction', '구독·좋아요 요청', 1], ['intro', '인트로', 1],
+    ['outro', '아웃트로', 1], ['preview', '미리보기·요약', 1], ['music_offtopic', '음악 영상 잡담', 1], ['filler', '본론 외 잡담', 0]];
   const NEXT_WAIT = 6000;                  // 끝난 뒤 YouTube가 안 넘기면 6초 후 다음 영상
   const BREAK_MS = 60 * 60 * 1000;         // 연속 재생 1시간마다 휴식
   const IDLE_RESET_MS = 10 * 60 * 1000;    // 10분 이상 쉬면 연속 재생 시간 초기화
@@ -40,8 +41,9 @@
   const loadJson = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) || d; } catch (e) { return d; } };
 
   // ================= 설정 (⚙ 버튼으로 켜고 끔, yt-page도 같은 값을 읽음) =================
-  const SET = Object.assign({ prune: true, origAudio: true, sb: true, chanSpeed: true, fresh: true, rest: true, tidy: true, endCards: true },
-    loadJson('krSet', {}));
+  const SET = Object.assign({ prune: true, origAudio: true, sb: true, chanSpeed: true, fresh: true, rest: true, tidy: true, endCards: true,
+    sbCats: SB_ALL.filter(c => c[2]).map(c => c[0]) }, loadJson('krSet', {}));
+  const saveSet = () => localStorage.setItem('krSet', JSON.stringify(SET));
   const applySet = () => {   // CSS로 처리하는 항목은 <html> 표시로 켜고 끔
     if (SET.tidy) html.dataset.krTidy = '1'; else delete html.dataset.krTidy;
     if (SET.endCards) html.dataset.krEndcards = '1'; else delete html.dataset.krEndcards;
@@ -207,6 +209,7 @@
   // 다음 영상 자동 재생을 허락함 (그 뒤에는 잠금 화면에서 직접 ▶를 눌러야 함 — WebKit 동작)
   const onEnded = v => {
     if (resting) return;
+    if (sleepEnd) { setSleep(0); return; }   // 취침 타이머 '이 영상 끝나면' → 다음 영상으로 넘기지 않음
     if (isShorts()) return nextShort();
     if (document.hidden) return cmd('next', v);
     const key = pageKey();
@@ -290,6 +293,19 @@
     if (now - lastBreakSave > 5000) {
       lastBreakSave = now;
       localStorage.setItem('krBreak', JSON.stringify({ played, lastPlay }));
+    }
+  };
+
+  // ================= 7-2. 취침 타이머 =================
+  // ⚙에서 15·30·60분 뒤 또는 '이 영상 끝나면' 멈춤 (화면이 꺼져 있어도 동작). 멈추면 타이머는 꺼짐.
+  let sleepAt = 0, sleepEnd = false, sleepMin = 0;
+  const setSleep = m => { sleepEnd = m === 'end'; sleepMin = typeof m === 'number' ? m : 0; sleepAt = sleepMin ? Date.now() + m * 60e3 : 0; };
+  const sleepLabel = () => (sleepEnd ? '영상 끝' : sleepAt ? Math.max(1, Math.ceil((sleepAt - Date.now()) / 60e3)) + '분' : '');
+  const checkSleep = v => {
+    if (!v || v.paused) return;
+    const t = +html.dataset.krT, d = +html.dataset.krD, rate = v.playbackRate || 1;
+    if ((sleepAt && Date.now() >= sleepAt) || (sleepEnd && d > 0 && t >= d - 1.5 * rate)) {   // 끝나기 직전에 멈춰 다음 영상으로 안 넘어가게
+      cmd('pause', v); setSleep(0);
     }
   };
 
@@ -510,7 +526,7 @@
     delete html.dataset.krSb;
     try {
       const prefix = (await sha256(id)).slice(0, 4);
-      const r = await fetch(`https://sponsor.ajay.app/api/skipSegments/${prefix}?categories=` + encodeURIComponent(JSON.stringify(SB_CATS)));
+      const r = await fetch(`https://sponsor.ajay.app/api/skipSegments/${prefix}?categories=` + encodeURIComponent(JSON.stringify(SET.sbCats)));
       const list = r.ok ? await r.json() : [];
       const mine = (list || []).find(x => x.videoID === id);
       if (sbFor !== id || !mine) return;
@@ -525,7 +541,7 @@
   // · 왼쪽 절반을 위/아래로 밀기: 영상 밝기 (20%~160%)
   // iPhone Safari는 웹페이지가 '화면 밝기'와 '소리 크기'를 바꾸는 것을 막아 둠 →
   // 밝기는 영상 자체의 밝기로 대신하고, 소리는 iPhone 음량 버튼으로 조절.
-  ((P, getVideo, getTime, seek, allowed, baseFilter) => {
+  const fsGest = ((P, getVideo, getTime, seek, allowed, baseFilter) => {
     let g = null, bright = 1, hudTimer = 0, eatClick = false;
     const hud = msg => {
       let el = document.getElementById(P + '-hud');
@@ -582,6 +598,7 @@
       }
       g = null;
     }, true);
+    return { hud };
   })('kr-fs', () => pseudoFs.video(), () => +html.dataset.krT || 0,
      (v, t) => cmd('seek', v, t), () => true, () => '');   // YouTube: 이동은 YouTube 자체 기능으로
 
@@ -589,13 +606,13 @@
   // iPhone 기본 전체화면은 손가락 터치 없이 켤 수 없고, 켜지면 페이지가 터치를 받지 못하므로 이 방식을 씀.
   // 영상을 페이지 맨 바깥(body)으로 잠시 옮겨 화면 전체에 고정 → 사이트 구조와 관계없이 항상 꽉 참.
   // 끄거나 영상이 끝나면 원래 자리로 되돌림. 전체화면에서 영상을 한 번 탭하면 tap(영상) 실행.
-  const pseudoFs = ((P, play, tap) => {
+  const pseudoFs = ((P, play, tap, dbl) => {
     const CSS = `
       video.${P} { position: fixed !important; top: 0 !important; left: 0 !important; right: auto !important; bottom: auto !important;
                    width: 100vw !important; height: 100vh !important; height: 100dvh !important;
                    max-width: none !important; max-height: none !important; margin: 0 !important; padding: 0 !important;
                    object-fit: contain !important; background: #000 !important; z-index: 2147483646 !important;
-                   opacity: 1 !important; visibility: visible !important; display: block !important; }
+                   opacity: 1 !important; visibility: visible !important; display: block !important; touch-action: manipulation !important; }
       html.${P}-on, html.${P}-on body { overflow: hidden !important; background: #000 !important;
                    transform: none !important; filter: none !important; contain: none !important; }`;
     let vid = null, home = null, homeParent = null, tapTimer = 0;
@@ -609,7 +626,7 @@
       if (!vid || e.target !== vid) return;
       e.preventDefault();
       e.stopImmediatePropagation();
-      if (tapTimer) { clearTimeout(tapTimer); tapTimer = 0; return; }
+      if (tapTimer) { clearTimeout(tapTimer); tapTimer = 0; if (dbl) dbl(e, vid); return; }   // 두 번 탭
       tapTimer = setTimeout(() => {
         tapTimer = 0;
         if (vid) tap(vid);
@@ -646,7 +663,13 @@
     // 영상이 끝나거나 다른 영상으로 바뀌면 원래 자리로 되돌림 → 사이트가 다음 영상을 정상적으로 이어서 재생
     ['ended', 'emptied'].forEach(ev => document.addEventListener(ev, e => { if (e.target === vid) exit(); }, true));
     return { enter, exit, video: () => vid };
-  })('kr-fs', v => cmd('play', v), () => showFsBar());   // YouTube: 한 번 탭 = 조작 막대 보이기
+  })('kr-fs', v => cmd('play', v), () => showFsBar(),          // YouTube: 한 번 탭 = 조작 막대 보이기
+     (e, v) => {                                                   // 두 번 탭: 화면 왼쪽 1/3 = 10초 뒤로, 오른쪽 1/3 = 10초 앞으로
+       const side = e.clientX < innerWidth / 3 ? -10 : e.clientX > innerWidth * 2 / 3 ? 10 : 0;
+       if (!side) return;
+       cmd('seek', v, Math.max(0, (+html.dataset.krT || 0) + side));
+       fsGest.hud(side > 0 ? '10초 앞으로 ▶▶' : '◀◀ 10초 뒤로');
+     });
 
   const landscape = matchMedia('(orientation: landscape)');
   const updateFs = v => {
@@ -838,6 +861,7 @@
     const active = activeVideo();
     const ad = isAd();
     trackBreak(active, ad);
+    checkSleep(active);
     if (!document.hidden) {                      // 화면 표시용은 보일 때만 (표시 오류가 나도 아래 기능은 계속 동작)
       try { progBar(active, ad); } catch (e) {}
       try { placeBar(); } catch (e) {}
@@ -879,7 +903,7 @@
 
     // 스폰서 구간 정보 받기 (건너뛰기는 YouTube 자체 기능으로 yt-page가 처리하므로 yt-page가 있을 때만)
     const id = vidId();
-    if (!SET.sb) { sbFor = null; sbSegs = []; delete html.dataset.krSb; }
+    if (!SET.sb || !SET.sbCats.length) { sbFor = null; sbSegs = []; delete html.dataset.krSb; }
     else if (id && html.dataset.krPage && sbFor !== id) loadSB(id);
     applySpeed(active);   // 채널이 바뀌어 속도가 다르면 맞춤 (재생 중일 때만)
   });
@@ -999,7 +1023,7 @@
         const b = document.getElementById('kr-speed'); if (b) b.textContent = x + 'x';
       });
     }],
-    ['kr-set', () => '⚙', () => openSettings()]
+    ['kr-set', () => (sleepLabel() ? '🌙 ' + sleepLabel() : '⚙'), () => openSettings()]
   ];
   // ----- 설정 화면 (⚙) -----
   const SET_ITEMS = [
@@ -1020,6 +1044,23 @@
       h('div', 'font:700 18px -apple-system,sans-serif;margin-bottom:8px', '설정'));
     const wrap = h('div', 'position:fixed;inset:0;z-index:2147483647;background:rgba(0,0,0,.55);', sheet);
     wrap.id = 'kr-settings';
+    const row = (...kids) => h('div', 'display:flex;align-items:center;gap:12px;padding:10px 0;border-top:1px solid #333', ...kids);
+    const chip = (text, on, fn) => {
+      const c = h('button', `padding:5px 10px;border:none;border-radius:12px;font:600 12px -apple-system,sans-serif;color:#fff;background:${on ? '#30d158' : '#48484a'}`, text);
+      c.addEventListener('click', fn);
+      return c;
+    };
+    // 취침 타이머
+    const sleepBox = h('div', 'display:flex;flex-wrap:wrap;gap:6px;margin-top:6px');
+    const paintSleep = () => {
+      sleepBox.replaceChildren(...[['끔', 0], ['15분', 15], ['30분', 30], ['60분', 60], ['이 영상 끝나면', 'end']].map(([t, m]) => {
+        const on = m === 'end' ? sleepEnd : !sleepEnd && sleepMin === m;
+        return chip(t, on, () => { setSleep(m); paintSleep(); const b = document.getElementById('kr-set'); if (b) b.textContent = BUTTONS.find(x => x[0] === 'kr-set')[1](); });
+      }));
+    };
+    paintSleep();
+    sheet.appendChild(row(h('div', 'flex:1', h('div', '', '🌙 취침 타이머' + (sleepLabel() ? ` (남은 ${sleepLabel()})` : '')),
+      h('div', 'color:#999;font-size:12px;margin-top:2px', '정한 시간이 지나면 멈춤 (화면이 꺼져 있어도)'), sleepBox)));
     const reloadBtn = h('button', 'display:none;width:100%;margin-top:10px;padding:11px;border:none;border-radius:10px;background:#0a84ff;color:#fff;font:600 15px -apple-system,sans-serif', '새로고침해서 적용');
     reloadBtn.addEventListener('click', () => location.reload());
     SET_ITEMS.forEach(([k, label, desc, reload]) => {
@@ -1029,12 +1070,21 @@
       paint();
       sw.addEventListener('click', () => {
         SET[k] = !SET[k];
-        localStorage.setItem('krSet', JSON.stringify(SET));
+        saveSet();
         applySet(); paint();
         if (reload) reloadBtn.style.display = 'block';
       });
-      sheet.appendChild(h('div', 'display:flex;align-items:center;gap:12px;padding:10px 0;border-top:1px solid #333',
-        h('div', 'flex:1', h('div', '', label + (reload ? ' *' : '')), desc ? h('div', 'color:#999;font-size:12px;margin-top:2px', desc) : ''), sw));
+      sheet.appendChild(row(h('div', 'flex:1', h('div', '', label + (reload ? ' *' : '')), desc ? h('div', 'color:#999;font-size:12px;margin-top:2px', desc) : ''), sw));
+      // 스폰서 구간 범주 고르기 (스폰서 줄 바로 아래)
+      if (k === 'sb') {
+        const box = h('div', 'display:flex;flex-wrap:wrap;gap:6px;padding:0 0 10px');
+        const paintCats = () => box.replaceChildren(...SB_ALL.map(([c, t]) => chip(t, SET.sbCats.includes(c), () => {
+          SET.sbCats = SET.sbCats.includes(c) ? SET.sbCats.filter(x => x !== c) : SET.sbCats.concat(c);
+          saveSet(); sbFor = null; paintCats();   // 다음 확인 때 새 범주로 다시 받음
+        })));
+        paintCats();
+        sheet.appendChild(box);
+      }
     });
     const close = h('button', 'width:100%;margin-top:10px;padding:11px;border:none;border-radius:10px;background:#3a3a3c;color:#fff;font:600 15px -apple-system,sans-serif', '닫기');
     close.addEventListener('click', () => wrap.remove());

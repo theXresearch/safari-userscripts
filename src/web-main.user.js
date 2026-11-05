@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Web Main
 // @namespace    https://github.com/theXresearch/safari-userscripts
-// @version      2026.11.05.2
+// @version      2026.11.05.3
 // @author       theXresearch
 // @updateURL    https://raw.githubusercontent.com/theXresearch/safari-userscripts/main/src/web-main.user.js
 // @downloadURL  https://raw.githubusercontent.com/theXresearch/safari-userscripts/main/src/web-main.user.js
@@ -240,7 +240,7 @@
   // ----- 전체화면 조작 화면 (평소에는 아무것도 안 보임 → 영상만) -----
   // · 영상을 한 번 탭: 조작 화면 표시 — 아래 진행 막대(현재 위치·전체 길이, 눌러서/끌어서 이동),
   //   가운데 재생/일시정지, 오른쪽 위 버튼 묶음. 3초 동안 손대지 않으면 사라짐. 보일 때 한 번 더 탭하면 바로 사라짐.
-  // · 옆으로 밀기(앞뒤 이동)·두 번 탭(전체화면 끄기)·두 손가락 탭(PiP)은 조작 화면 없이 그대로 동작
+  // · 옆으로 밀기(앞뒤 이동)·두 번 탭(가운데 = 전체화면 끄기, 좌우 = 10초 이동)·두 손가락 탭(PiP)은 조작 화면 없이 그대로 동작
   let fsUi = null, scrub = null, uiTick = 0, uiTimer = 0, uiOn = false;
   const makeFsUi = () => {
     const seek = document.createElement('div');
@@ -393,7 +393,7 @@
   // · 왼쪽 절반을 위/아래로 밀기: 영상 밝기 (20%~160%)
   // iPhone Safari는 웹페이지가 '화면 밝기'와 '소리 크기'를 바꾸는 것을 막아 둠 →
   // 밝기는 영상 자체의 밝기로 대신하고, 소리는 iPhone 음량 버튼으로 조절.
-  ((P, getVideo, getTime, seek, allowed, baseFilter) => {
+  const fsGest = ((P, getVideo, getTime, seek, allowed, baseFilter) => {
     let g = null, bright = 1, hudTimer = 0, eatClick = false;
     const hud = msg => {
       let el = document.getElementById(P + '-hud');
@@ -450,6 +450,7 @@
       }
       g = null;
     }, true);
+    return { hud };
   })('kw-fs', () => pseudoFs.video(), () => pseudoFs.video().currentTime,
      (v, t) => { v.currentTime = t; }, () => Z.s <= 1,                       // 확대 중에는 끌기가 화면 이동이므로 제외
      () => (document.getElementById('kw-dark') ? 'invert(1) hue-rotate(180deg) ' : ''));   // 다크 모드 색 보정 유지
@@ -464,7 +465,7 @@
                    width: 100vw !important; height: 100vh !important; height: 100dvh !important;
                    max-width: none !important; max-height: none !important; margin: 0 !important; padding: 0 !important;
                    object-fit: contain !important; background: #000 !important; z-index: 2147483000 !important;   /* 다른 확장 프로그램 버튼(M3U8 등)이 영상 위에 보이도록 최대값보다 낮게 */
-                   opacity: 1 !important; visibility: visible !important; display: block !important; }
+                   opacity: 1 !important; visibility: visible !important; display: block !important; touch-action: manipulation !important; }
       html.${P}-on, html.${P}-on body { overflow: hidden !important; background: #000 !important;
                    transform: none !important; filter: none !important; contain: none !important; }
       html.${P}-on [data-kw-fshide] { visibility: hidden !important; }`;
@@ -533,7 +534,9 @@
       unhide(vid);
       if (!document.documentElement.classList.contains(P + '-on')) document.documentElement.classList.add(P + '-on');
     }, 400);
-    return { enter, exit, video: () => vid };
+    // 두 번 탭을 따로 처리했을 때, 첫 탭이 예약한 '한 번 탭' 동작(조작 화면 표시) 취소
+    const cancelTap = () => { clearTimeout(tapTimer); tapTimer = 0; };
+    return { enter, exit, cancelTap, video: () => vid };
   })('kw-fs', v => v.play().catch(() => {}), () => toggleFsUi());   // 한 번 탭 = 조작 화면 보이기/숨기기
 
   let lastTapAt = 0, lastX = 0, lastY = 0;
@@ -555,6 +558,14 @@
     if (now - lastTapAt < 300 && Math.abs(t.clientX - lastX) < 40 && Math.abs(t.clientY - lastY) < 40) {
       e.preventDefault();   // 두 번 탭 확대(줌) 막기
       lastTapAt = 0;
+      pseudoFs.cancelTap();
+      // 전체화면 중: 왼쪽 1/3 = 10초 뒤로, 오른쪽 1/3 = 10초 앞으로, 가운데 = 전체화면 끄기
+      const side = pseudoFs.video() ? (t.clientX < innerWidth / 3 ? -10 : t.clientX > innerWidth * 2 / 3 ? 10 : 0) : 0;
+      if (side && isFinite(v.duration)) {
+        v.currentTime = Math.max(0, Math.min(v.duration - 0.5, v.currentTime + side));
+        fsGest.hud(side > 0 ? '10초 앞으로 ▶▶' : '◀◀ 10초 뒤로');
+        return;
+      }
       toggleFs(v);
     } else {
       lastTapAt = now; lastX = t.clientX; lastY = t.clientY;

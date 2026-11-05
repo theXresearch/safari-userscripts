@@ -10,6 +10,8 @@ const EXPECT = {
               /player log: audio en-orig \| play \| seek 20/, /marks on progress bar: 1/, /errors: \[\]/],
   pw_settings: [/buttons: PiP,240p,1\.25x,⚙/, /chan speeds: \{"강의채널":1\.5\}/, /other channel label: 1\.25x/,
                 /back to 강의채널 label: 1\.5x/, /after off: like= inline endcard= block/, /errors: \[\]/],
+  pw_phase3: [/gear label: 🌙 영상 끝/, /SB refetch cats: \["selfpromo"/, /sleep end → cmds: 1 pause \| gear after: ⚙/,
+              /double-tap cmds: .*seek:90.*seek:110/, /web fs double-tap: left→ 90 \| right x2→ 110 \| middle exits fs: true → false/, /errors: \[\]/],
   pw_ytmenu: [/menu: 자동 \| 1080p/, /after pick: quality::hd720/, /speed menu: .*✓ 1\.25x/],
   pw_fetchdates: [/모은 게시일: \{"NEWVIDEO001":"2일 전"\}/],
   pw_avatar: [/목록 로고: 숨김 \| 시청화면 채널 로고: 숨김 \| 영상 썸네일: 보임/],
