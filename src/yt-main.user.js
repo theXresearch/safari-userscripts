@@ -1,11 +1,11 @@
 // ==UserScript==
 // @name         YT Main
 // @namespace    https://github.com/theXresearch/safari-userscripts
-// @version      2026.11.05.3
+// @version      2026.11.05.4
 // @author       theXresearch
 // @updateURL    https://raw.githubusercontent.com/theXresearch/safari-userscripts/main/src/yt-main.user.js
 // @downloadURL  https://raw.githubusercontent.com/theXresearch/safari-userscripts/main/src/yt-main.user.js
-// @description  YouTube: 속도·화질·PiP 버튼, 두 손가락 톡 PiP, 광고 건너뛰기, 소리 켜기, 스폰서 건너뛰기, 다음 영상·Shorts 연속재생(화면 꺼짐 포함), 잠금 화면 버튼, 하단 진행 막대, 홈 화면 새 영상 우선(본 영상·반복 영상 숨김), 목록·시청 화면에 조회수 대신 게시일, 채널 로고·좋아요·댓글·필터 칩 숨김, 아래로 내리면 영상도 위로, Shorts 화면 정리, 1시간 휴식, 가로 회전 시 전체화면(조작 막대·밀어서 이동·밝기)
+// @description  YouTube: ⚙ 설정·작동 상태, 속도(채널별)·화질·PiP 버튼, 취침 타이머, Shorts를 일반 화면으로, 두 손가락 톡 PiP, 광고 건너뛰기, 소리 켜기, 스폰서 건너뛰기, 다음 영상·Shorts 연속재생(화면 꺼짐 포함), 잠금 화면 버튼, 하단 진행 막대, 홈 화면 새 영상 우선(본 영상·반복 영상 숨김), 목록·시청 화면에 조회수 대신 게시일, 채널 로고·좋아요·댓글·필터 칩 숨김, 아래로 내리면 영상도 위로, Shorts 화면 정리, 1시간 휴식, 가로 회전 시 전체화면(조작 막대·밀어서 이동·밝기)
 // @match        *://*.youtube.com/*
 // @run-at       document-start
 // ==/UserScript==
@@ -41,8 +41,9 @@
   const loadJson = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) || d; } catch (e) { return d; } };
 
   // ================= 설정 (⚙ 버튼으로 켜고 끔, yt-page도 같은 값을 읽음) =================
+  const VERSION = '2026.11.05.4';   // 위 @version과 같게 (⚙ 작동 상태에 표시)
   const SET = Object.assign({ prune: true, origAudio: true, sb: true, chanSpeed: true, fresh: true, rest: true, tidy: true, endCards: true,
-    sbCats: SB_ALL.filter(c => c[2]).map(c => c[0]) }, loadJson('krSet', {}));
+    shortsNormal: false, capLang: '', sbCats: SB_ALL.filter(c => c[2]).map(c => c[0]) }, loadJson('krSet', {}));
   const saveSet = () => localStorage.setItem('krSet', JSON.stringify(SET));
   const applySet = () => {   // CSS로 처리하는 항목은 <html> 표시로 켜고 끔
     if (SET.tidy) html.dataset.krTidy = '1'; else delete html.dataset.krTidy;
@@ -65,6 +66,19 @@
   };
   const getQuality = () => localStorage.getItem('krQuality') || 'small';   // 기본 240p (없으면 360p)
   const isShorts = () => location.pathname.startsWith('/shorts/');
+  // [설정] Shorts를 일반 시청 화면으로: Shorts 링크를 누르면 /watch?v= 로 열고, Shorts 주소로 들어오면 바꿔서 다시 엶
+  // (일반 화면에서는 속도·진행 막대·스폰서 건너뛰기·전체화면 등을 그대로 씀)
+  const shortsId = () => (location.pathname.match(/^\/shorts\/([\w-]{11})/) || [])[1];
+  const toNormal = () => { const id = shortsId(); if (SET.shortsNormal && id) location.replace('/watch?v=' + id); };
+  toNormal();
+  document.addEventListener('click', e => {
+    if (!SET.shortsNormal || !e.isTrusted) return;
+    const a = e.target.closest && e.target.closest('a[href*="/shorts/"]');
+    const m = a && (a.getAttribute('href') || '').match(/\/shorts\/([\w-]{11})/);
+    if (!m) return;
+    e.preventDefault(); e.stopImmediatePropagation();
+    location.href = '/watch?v=' + m[1];
+  }, true);
   const vidId = () => new URLSearchParams(location.search).get('v');
   const pageKey = () => (isShorts() ? location.pathname : (vidId() || ''));
   const playerEl = () => document.querySelector('#movie_player, #shorts-player, .html5-video-player');
@@ -781,7 +795,7 @@
       vids.find(v => { const r = v.getBoundingClientRect(); return r.height > 0 && r.top < innerHeight / 2 && r.bottom > innerHeight / 2; }) ||
       vids[0];
   };
-  let lastKey = null;
+  let lastKey = null, adSkips = 0;
 
   // 영상 하단 진행 표시 (Shorts·일반 영상): 얇은 막대 + 왼쪽 아래 작은 "현재 / 전체" (오른쪽 버튼과 겹치지 않게)
   // 보기만 함(터치는 영상으로 통과). 광고 중·전체화면 조작 막대가 보일 때는 숨김.
@@ -871,7 +885,8 @@
     // 광고: '건너뛰기' 버튼이 나오면 누르기만 함.
     // (광고 위치를 강제로 옮기면 YouTube가 감지하거나 이어 붙은 본 영상까지 끝으로 밀려 플레이어가 멈춤)
     if (ad) {
-      document.querySelectorAll('.ytp-ad-skip-button, .ytp-ad-skip-button-modern, .ytp-skip-ad-button').forEach(b => b.click());
+      const skipBtns = document.querySelectorAll('.ytp-ad-skip-button, .ytp-ad-skip-button-modern, .ytp-skip-ad-button');
+      if (skipBtns.length) { adSkips++; skipBtns.forEach(b => b.click()); }
       return;
     }
 
@@ -889,6 +904,7 @@
 
     // Shorts: 화면 정리, 반복 끄기, 끝나면(처음으로 되감기면) 다음 편
     // (영상 칸이 다음 Shorts에 재사용되거나 직접 넘긴 직후에는 이전 기록을 버려 두 편씩 넘어가지 않게)
+    if (isShorts() && SET.shortsNormal) return toNormal();   // YouTube가 화면 안에서 Shorts로 옮겨 간 경우
     if (isShorts()) {
       tidyShorts(active, key);
       if (active.loop) active.loop = false;
@@ -1034,8 +1050,44 @@
     ['fresh', '홈: 본 영상·반복 영상 숨김', '새 영상이 위로', true],
     ['rest', '1시간 연속 재생 시 휴식', ''],
     ['tidy', '좋아요·댓글·채널 로고 숨김', '', true],
-    ['endCards', '영상 위 추천·정보 카드 숨김', '']
+    ['endCards', '영상 위 추천·정보 카드 숨김', ''],
+    ['shortsNormal', 'Shorts를 일반 화면으로 열기', '속도·진행 막대·스폰서 건너뛰기를 Shorts에서도']
   ];
+  // ----- 작동 상태 (⚙ 아래쪽): 보이지 않게 동작하는 기능이 실제로 되고 있는지 표시 -----
+  // 문제가 생기면 이 화면 스크린샷 한 장으로 원인을 알 수 있게
+  const statusLines = () => {
+    const st = loadJsonStr(html.dataset.krStat), ok = '✓', no = '–', warn = '⚠';
+    const page = !!html.dataset.krPage, id = vidId(), L = [];
+    const ago = t => { const m = Math.round((Date.now() - t) / 60e3); return m < 1 ? '방금' : m + '분 전'; };
+    L.push([page ? ok : warn, page ? 'YT Page 연결됨 (백그라운드 재생·잠금 화면·명령)' : 'YT Page가 동작하지 않음 — 설치·켜짐 확인']);
+    L.push(!SET.prune ? [no, '광고 일정 미리 빼기: 꺼짐'] : st.prune ? [ok, `광고 일정 ${st.prune}건 제거 (마지막 ${ago(st.pruneAt)})`]
+      : [ok, '광고 일정 미리 빼기: 대기 중 (아직 제거할 광고 없음)']);
+    L.push([adSkips ? ok : no, `광고 '건너뛰기' 누름: ${adSkips}번 (영상에 붙어 온 광고)`]);
+    if (id && !isShorts()) {
+      const a = st.audio || '';
+      L.push(!SET.origAudio ? [no, '자동 더빙 끄기: 꺼짐'] : a.startsWith('switched:') ? [ok, `원래 음성으로 바꿈 (${a.slice(9)} → 원래)`]
+        : a === 'orig' ? [ok, '원래 음성으로 재생 중'] : a === 'single' ? [ok, '음성 하나뿐 (더빙 없음)']
+        : a === 'noorig' ? [warn, '여러 음성 중 원래 음성을 찾지 못함'] : [no, '음성 확인 중 (재생 중일 때 확인)']);
+      const c = st.cap || '';
+      L.push(!SET.capLang ? [no, '자막 자동 켜기: 꺼짐'] : c.startsWith('on:') ? [ok, `자막 켬: ${c.slice(3)}`]
+        : c.startsWith('translated:') ? [ok, `자막 자동 번역: ${c.slice(11)} → ${SET.capLang}`] : c === 'none' ? [no, '이 영상엔 자막 없음']
+        : c === 'fail' ? [warn, '자막을 켜지 못함'] : [no, '자막 확인 중']);
+      L.push(!SET.sb ? [no, '스폰서 건너뛰기: 꺼짐'] : sbFor !== id ? [no, '스폰서 구간 받는 중']
+        : sbSegs.length ? [ok, `스폰서 구간 ${sbSegs.length}개 · ${st.skips || 0}번 건너뜀`] : [ok, '이 영상엔 등록된 스폰서 구간 없음']);
+      L.push([ok, `속도 ${getSpeed()}x · ${SET.chanSpeed && chanSpeeds[chan()] ? `'${chan().slice(0, 14)}' 채널 기억` : '기본 속도'}`]);
+      L.push([st.ms ? ok : no, st.ms ? '잠금 화면 버튼 연결됨' : '잠금 화면 버튼 연결 대기']);
+    }
+    // 화면 구조 점검: 이 스크립트가 기대하는 YouTube 화면 요소가 있는지
+    const need = id && !isShorts()
+      ? [['플레이어', '#movie_player'], ['상단 바', 'ytm-mobile-topbar-renderer, #header-bar'],
+         ['제목 줄', 'yt-video-metadata-view-model, ytm-slim-video-metadata-section-renderer, .slim-video-information-title']]
+      : location.pathname === '/' ? [['홈 목록', 'ytm-rich-item-renderer, ytm-video-with-context-renderer']] : [];
+    const miss = need.filter(([, sel]) => !document.querySelector(sel)).map(([n]) => n);
+    if (need.length) L.push(miss.length ? [warn, `화면 구조 바뀜: ${miss.join(', ')}을(를) 못 찾음`] : [ok, '화면 구조 정상']);
+    L.push([no, `버전 ${VERSION}`]);
+    return L;
+  };
+  const loadJsonStr = t => { try { return JSON.parse(t) || {}; } catch (e) { return {}; } };
   const openSettings = () => {
     closeMenu();
     if (document.getElementById('kr-settings')) return;
@@ -1086,6 +1138,21 @@
         sheet.appendChild(box);
       }
     });
+    // 자막 자동 켜기 (언어)
+    const capBox = h('div', 'display:flex;flex-wrap:wrap;gap:6px;margin-top:6px');
+    const paintCap = () => capBox.replaceChildren(...[['끔', ''], ['한국어', 'ko'], ['English', 'en']].map(([t, l]) =>
+      chip(t, SET.capLang === l, () => { SET.capLang = l; saveSet(); paintCap(); })));
+    paintCap();
+    sheet.appendChild(row(h('div', 'flex:1', h('div', '', '자막 자동 켜기'),
+      h('div', 'color:#999;font-size:12px;margin-top:2px', '고른 언어 자막을 켬. 없으면 자동 번역 (다음 영상부터)'), capBox)));
+    // 작동 상태 (열려 있는 동안 1초마다 갱신)
+    const statBox = h('div', 'margin-top:12px;padding:10px 12px;border-radius:10px;background:#2c2c2e;font:13px/1.55 -apple-system,sans-serif');
+    statBox.id = 'kr-stat';
+    const paintStat = () => statBox.replaceChildren(h('div', 'font-weight:700;margin-bottom:4px', '작동 상태'),
+      ...statusLines().map(([i, t]) => h('div', `color:${i === '⚠' ? '#ffd60a' : i === '✓' ? '#fff' : '#999'}`, `${i} ${t}`)));
+    paintStat();
+    const statTimer = setInterval(() => { if (!wrap.isConnected) clearInterval(statTimer); else paintStat(); }, 1000);
+    sheet.appendChild(statBox);
     const close = h('button', 'width:100%;margin-top:10px;padding:11px;border:none;border-radius:10px;background:#3a3a3c;color:#fff;font:600 15px -apple-system,sans-serif', '닫기');
     close.addEventListener('click', () => wrap.remove());
     wrap.addEventListener('click', e => { if (e.target === wrap) wrap.remove(); });

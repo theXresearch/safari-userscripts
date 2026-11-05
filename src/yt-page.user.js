@@ -1,11 +1,11 @@
 // ==UserScript==
 // @name         YT Page
 // @namespace    https://github.com/theXresearch/safari-userscripts
-// @version      2026.11.05.3
+// @version      2026.11.05.4
 // @author       theXresearch
 // @updateURL    https://raw.githubusercontent.com/theXresearch/safari-userscripts/main/src/yt-page.user.js
 // @downloadURL  https://raw.githubusercontent.com/theXresearch/safari-userscripts/main/src/yt-page.user.js
-// @description  YouTube 플레이어 자체 기능으로 제어: 광고 일정 미리 빼기, 자동 더빙 끄기(원래 음성), 재생·정지·다음·이동·속도·소리·화질 명령 실행, 재생 시간·화질 목록 보고, 화면 숨김·창 벗어남 감지 차단, 잠금 화면 재생 버튼 연결, '계속 시청' 멈춤 방지
+// @description  YouTube 플레이어 자체 기능으로 제어: 광고 일정 미리 빼기, 자동 더빙 끄기(원래 음성), 자막 자동 켜기, 작동 상태 보고, 재생·정지·다음·이동·속도·소리·화질 명령 실행, 재생 시간·화질 목록 보고, 화면 숨김·창 벗어남 감지 차단, 잠금 화면 재생 버튼 연결, '계속 시청' 멈춤 방지
 // @match        *://*.youtube.com/*
 // @run-at       document-start
 // @inject-into  page
@@ -41,13 +41,19 @@
   // → 광고가 아예 예약되지 않음. 영상 자체에 붙여 보내는 광고(SSAP)는 못 빼므로 yt-main의 '건너뛰기'가 계속 대비.
   // 끄기: ⚙ 설정 → '광고 일정 미리 빼기' (YouTube가 광고 차단 경고를 띄우면 끄면 됨)
   const AD_KEYS = ['adPlacements', 'playerAds', 'adSlots', 'adBreakHeartbeatParams'];
-  // 설정(yt-main의 ⚙): localStorage krSet = { prune, origAudio, ... }
-  const setting = k => { try { const o = JSON.parse(localStorage.getItem('krSet')) || {}; return o[k] !== false; } catch (e) { return true; } };
+  // 설정(yt-main의 ⚙): localStorage krSet = { prune, origAudio, capLang, ... }
+  const settings = () => { try { return JSON.parse(localStorage.getItem('krSet')) || {}; } catch (e) { return {}; } };
+  const setting = k => settings()[k] !== false;                 // 켜고 끄는 항목 (기본 켜짐)
+  // 작동 상태 (yt-main ⚙ 아래 '작동 상태'에 표시): <html data-kr-stat>
+  const st = { prune: 0, pruneAt: 0, ms: false, vid: '', audio: '', skips: 0, cap: '' };
   const pruneOn = setting('prune') && (() => { try { return localStorage.getItem('krPrune') !== 'off'; } catch (e) { return true; } })();
   const prune = o => {
     if (!o || typeof o !== 'object') return o;
     [o, o.playerResponse, o.response && o.response.playerResponse].forEach(t => {
-      if (t && typeof t === 'object') AD_KEYS.forEach(k => { if (k in t) delete t[k]; });
+      if (!t || typeof t !== 'object') return;
+      let hit = false;
+      AD_KEYS.forEach(k => { if (k in t) { delete t[k]; hit = true; } });
+      if (hit) { st.prune++; st.pruneAt = Date.now(); }
     });
     if (Array.isArray(o)) o.forEach(prune);   // 여러 응답이 묶여 오는 경우
     return o;
@@ -143,7 +149,7 @@
     // 영상이 바뀔 때(그리고 30초마다 한 번) 버튼 연결·제목을 다시 설정 → YouTube가 덮어써도 복구
     if (id && (id !== msFor || tick % 60 === 0)) {
       msFor = id;
-      Object.entries(ACTIONS).forEach(([a, f]) => { try { ms.setActionHandler(a, f); } catch (e) {} });
+      Object.entries(ACTIONS).forEach(([a, f]) => { try { ms.setActionHandler(a, f); st.ms = true; } catch (e) {} });
       try {
         ms.metadata = new MediaMetadata({ title: data.title || 'YouTube', artist: data.author || '',
           artwork: [{ src: `https://i.ytimg.com/vi/${id}/hqdefault.jpg`, sizes: '480x360', type: 'image/jpeg' }] });
@@ -208,18 +214,42 @@
     if (!p.getAvailableAudioTracks || !p.setAudioTrack || !p.getVideoData || !setting('origAudio')) return;
     const id = (p.getVideoData() || {}).video_id || '';
     if (!id || !v || v.paused || isAd(p)) return;
-    if (audioFor !== id) { audioFor = id; audioTries = 0; }
+    if (audioFor !== id) { audioFor = id; audioTries = 0; st.audio = ''; }
     if (audioTries > 5) return;                      // 이 영상은 처리 끝(또는 포기)
     audioTries++;
     const tracks = p.getAvailableAudioTracks() || [];
-    if (tracks.length < 2) return;
-    const orig = tracks.find(t => t.isOriginalTrack === true) ||
-      tracks.find(t => /original|원본|원래/i.test(t.displayName || (t.getName && t.getName()) || ''));
+    const name = t => (t && (t.displayName || (t.getName && t.getName()))) || '';
+    if (tracks.length < 2) { st.audio = 'single'; return; }   // 음성이 하나뿐 (더빙 없음)
+    const orig = tracks.find(t => t.isOriginalTrack === true) || tracks.find(t => /original|원본|원래/i.test(name(t)));
     const cur = p.getAudioTrack && p.getAudioTrack();
-    if (!orig || (cur && cur.id === orig.id)) { audioTries = 99; return; }
-    p.setAudioTrack(orig);
     audioTries = 99;
+    if (!orig) { st.audio = 'noorig'; return; }
+    if (cur && cur.id === orig.id) { st.audio = 'orig'; return; }
+    p.setAudioTrack(orig);
+    st.audio = 'switched:' + name(cur).slice(0, 24);
     setTimeout(() => { if (v.paused) play(); }, 800);
+  };
+
+  // ================= 4-3-2. 자막 자동 켜기 (⚙에서 언어 선택, 기본 끔) =================
+  // 고른 언어 자막(사람이 만든 것 우선, 없으면 자동 생성)을 켬. 그 언어가 없으면 첫 자막을 그 언어로 자동 번역.
+  let capFor = '', capTries = 0;
+  const fixCaptions = p => {
+    const lang = settings().capLang || '';
+    const id = (p.getVideoData && (p.getVideoData() || {}).video_id) || '';
+    if (!id || isAd(p)) return;
+    if (capFor !== id) { capFor = id; capTries = 0; st.cap = lang ? '' : 'off'; }
+    if (!lang || capTries > 8 || !p.getOption || !p.setOption) return;
+    capTries++;
+    try { if (p.loadModule) p.loadModule('captions'); } catch (e) {}
+    const list = (() => { try { return p.getOption('captions', 'tracklist') || []; } catch (e) { return []; } })();
+    if (!list.length) { if (capTries > 8) st.cap = 'none'; return; }   // 자막 정보가 아직 없음 → 다음에 다시 (8초까지)
+    const mine = list.filter(t => (t.languageCode || '').startsWith(lang));
+    const pick = mine.find(t => t.kind !== 'asr') || mine[0];
+    try {
+      if (pick) { p.setOption('captions', 'track', { languageCode: pick.languageCode }); st.cap = 'on:' + (pick.displayName || pick.languageCode); }
+      else { p.setOption('captions', 'track', { languageCode: list[0].languageCode, translationLanguage: { languageCode: lang } }); st.cap = 'translated:' + (list[0].displayName || list[0].languageCode); }
+    } catch (e) { st.cap = 'fail'; }
+    capTries = 99;
   };
 
   // ================= 4-4. 스폰서 구간 건너뛰기 (구간 정보는 yt-main이 받아 <html data-kr-sb>에 넣어 줌) =================
@@ -235,7 +265,7 @@
     const t = p.getCurrentTime();
     if (!(t > 0.5)) return;                            // 재생 시작 순간에는 끼어들지 않음
     const seg = sb.segs.find(([a, b]) => t >= a && t < b - 0.5);
-    if (seg) p.seekTo(seg[1], true);
+    if (seg) { p.seekTo(seg[1], true); st.skips++; }
   }, true);
 
   // ================= 5. 상태 보고 (읽기만 함) =================
@@ -254,7 +284,11 @@
       updateSession(p, v);
       const ch = (p.getVideoData && (p.getVideoData() || {}).author) || '';
       if (ch && root().dataset.krChan !== ch) root().dataset.krChan = ch;   // yt-main 채널별 속도용
-      if (tick % 2 === 0 && !document.hidden) fixAudio(p, v);   // 1초마다, 화면이 보일 때만
+      const vid = (p.getVideoData && (p.getVideoData() || {}).video_id) || '';
+      if (vid && vid !== st.vid) { st.vid = vid; st.skips = 0; }
+      if (tick % 2 === 0 && !document.hidden) { fixAudio(p, v); fixCaptions(p); }   // 1초마다, 화면이 보일 때만
+      const stat = JSON.stringify(st);
+      if (root().dataset.krStat !== stat) root().dataset.krStat = stat;
     } catch (e) {}
   }, 500);
 })();

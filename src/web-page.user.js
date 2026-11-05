@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Web Page
 // @namespace    https://github.com/theXresearch/safari-userscripts
-// @version      2026.11.05.3
+// @version      2026.11.05.4
 // @author       theXresearch
 // @updateURL    https://raw.githubusercontent.com/theXresearch/safari-userscripts/main/src/web-page.user.js
 // @downloadURL  https://raw.githubusercontent.com/theXresearch/safari-userscripts/main/src/web-page.user.js
@@ -76,25 +76,28 @@
   // 새 창
   // 막을 때 null 대신 '이미 닫힌 가짜 창'을 돌려줌 → 광고 코드가 창을 다루다 오류로 멈추면서
   // 같은 코드에 묶인 사이트 기능(재생 버튼 등)까지 멈추는 것을 막음
+  // 막은 횟수 → <html data-kw-st-blocked> (web-main ⚙ '작동 상태'에 표시)
+  let blocked = 0;
+  const bump = () => { blocked++; try { document.documentElement.dataset.kwStBlocked = blocked; } catch (e) {} };
   const noop = () => {};
   const fakeWin = () => ({ closed: true, opener: null, close: noop, focus: noop, blur: noop, postMessage: noop,
     location: { href: '', assign: noop, replace: noop, reload: noop }, document: { write: noop, writeln: noop, open: noop, close: noop } });
   const origOpen = window.open;
   window.open = function (url, ...rest) {
     const u = String(url || '').trim();
-    if (isAd(u)) return fakeWin();
+    if (isAd(u)) { bump(); return fakeWin(); }
     // 실드: 직접 누른 링크가 가리키는 곳이거나 로그인·결제·공유 창일 때만 허용 (같은 사이트를 새 탭에 복제하는 수법도 차단)
-    if (shield && !userChose(u || location.href) && !(u && SAFE.test(hostOf(u)))) return fakeWin();
+    if (shield && !userChose(u || location.href) && !(u && SAFE.test(hostOf(u)))) { bump(); return fakeWin(); }
     return origOpen.call(window, url, ...rest);
   };
   // 스크립트가 몰래 만든 링크를 대신 누르는 방식
   const sneaky = a => isAd(a.href) || (shield && a.target === '_blank' && foreign(a.href) && !isMedia(a.href));
   try {
     const origClick = HTMLAnchorElement.prototype.click;
-    HTMLAnchorElement.prototype.click = function () { if (sneaky(this)) return; return origClick.call(this); };
+    HTMLAnchorElement.prototype.click = function () { if (sneaky(this)) return bump(); return origClick.call(this); };
     const origDispatch = EventTarget.prototype.dispatchEvent;
     EventTarget.prototype.dispatchEvent = function (ev) {
-      if (ev && ev.type === 'click' && this instanceof HTMLAnchorElement && sneaky(this)) return false;
+      if (ev && ev.type === 'click' && this instanceof HTMLAnchorElement && sneaky(this)) { bump(); return false; }
       return origDispatch.call(this, ev);
     };
   } catch (e) {}
@@ -107,7 +110,7 @@
       const r = a.getBoundingClientRect();
       overlay = r.width * r.height > innerWidth * innerHeight * 0.3;
     }
-    if (isAd(a.href) || overlay) { e.preventDefault(); e.stopImmediatePropagation(); }
+    if (isAd(a.href) || overlay) { e.preventDefault(); e.stopImmediatePropagation(); bump(); }
   }, true);
   // 페이지 이동: 광고 사이트로는 항상 차단. 실드가 켜져 있으면, 화면을 누른 직후
   // 누른 링크와 다른 사이트로 몰래 넘어가는 것도 차단 (양식 제출·새로고침·뒤로가기는 제외)
@@ -117,11 +120,13 @@
       const url = e.destination.url;
       const sneakyNav = shield && !e.formData && (e.navigationType === 'push' || e.navigationType === 'replace') &&
         justTapped() && foreignTo(url, location.hostname) && !userChose(url);
-      if (isAd(url) || sneakyNav) e.preventDefault();
+      if (isAd(url) || sneakyNav) { e.preventDefault(); bump(); }
     });
   }
 
   if (window.top !== window.self) return;   // 아래는 바깥 페이지에서만
+  const markReady = () => { if (document.documentElement) document.documentElement.dataset.kwPage = shield ? 'on' : 'off'; else setTimeout(markReady, 10); };
+  markReady();   // web-main에게 '동작 중'과 실드 상태를 알림
 
   // ================= 2. 화면 숨김 감지 차단 =================
 

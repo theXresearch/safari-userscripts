@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Web AdBlock
 // @namespace    https://github.com/theXresearch/safari-userscripts
-// @version      2026.11.05.3
+// @version      2026.11.05.4
 // @author       theXresearch
 // @updateURL    https://raw.githubusercontent.com/theXresearch/safari-userscripts/main/src/web-adblock.user.js
 // @downloadURL  https://raw.githubusercontent.com/theXresearch/safari-userscripts/main/src/web-adblock.user.js
@@ -35,7 +35,10 @@
   document.documentElement.dataset.kwAd = AD_NET.source + '|' + GAMBLE.source;
 
   const own = el => !!(el.closest && el.closest('[id^="kw-"]'));   // 스크립트가 만든 버튼·안내창
-  const hide = el => { el.style.setProperty('display', 'none', 'important'); el.dataset.kwHidden = '1'; };
+  // 지운·숨긴 광고 수 → <html data-kw-st-ads> (web-main ⚙ '작동 상태'에 표시)
+  let removed = 0;
+  const count = () => { removed++; document.documentElement.dataset.kwStAds = removed; };
+  const hide = el => { el.style.setProperty('display', 'none', 'important'); el.dataset.kwHidden = '1'; count(); };
 
   // ================= 1. 알려진 광고 자리 숨김 (CSS) + 직접 지정한 광고 =================
   const GENERIC = [
@@ -70,8 +73,8 @@
   })();
   const killAdNodes = root => {
     const bad = n => isAdUrl(n.src) || isAdFrame(n);
-    if (root.matches && root.matches(AD_NODES) && bad(root)) { root.remove(); return; }
-    if (root.querySelectorAll) root.querySelectorAll(AD_NODES).forEach(n => { if (bad(n)) n.remove(); });
+    if (root.matches && root.matches(AD_NODES) && bad(root)) { root.remove(); count(); return; }
+    if (root.querySelectorAll) root.querySelectorAll(AD_NODES).forEach(n => { if (bad(n)) { n.remove(); count(); } });
   };
   let dirty = true;   // 페이지에 변화가 있었는지 → 있을 때만 전체 검사 (배터리 절약)
   new MutationObserver(ms => {
@@ -113,7 +116,7 @@
     const bad = [...document.querySelectorAll('video')].filter(isAdVideo);
     if (!bad.length) return;
     const box = adBox(bad);
-    bad.forEach(v => { try { v.pause(); } catch (e) {} v.remove(); });
+    bad.forEach(v => { try { v.pause(); } catch (e) {} v.remove(); count(); });
     if (box) hide(box);
   };
   // 재생이 시작되는 순간 바로 검사 (전체 검사 주기를 기다리지 않음)
@@ -268,7 +271,7 @@
     bar.appendChild(msg);
     let shieldOn = true;
     try { shieldOn = localStorage.getItem('kwShield') !== 'off'; } catch (e) {}
-    [['up', '더 크게'], ['reset', '이 사이트 초기화'], ['shield', shieldOn ? '🛡 실드 켜짐' : '실드 꺼짐'], ['close', '닫기']].forEach(([a, txt]) => {
+    [['up', '더 크게'], ['reset', '이 사이트 초기화'], ['shield', shieldOn ? '🛡 실드 켜짐' : '실드 꺼짐'], ['set', '⚙ 설정'], ['close', '닫기']].forEach(([a, txt]) => {
       const b = document.createElement('button');
       b.dataset.a = a;
       b.textContent = txt;
@@ -286,7 +289,8 @@
         // 이 사이트에서 팝업 차단(실드) 켜기/끄기 → 새로고침해야 적용
         try { if (shieldOn) localStorage.setItem('kwShield', 'off'); else localStorage.removeItem('kwShield'); } catch (err) {}
         location.reload();
-      } else if (a === 'close') stopPicking();
+      } else if (a === 'set') { stopPicking(); document.dispatchEvent(new Event('kw-open-settings')); }   // web-main의 설정 화면
+      else if (a === 'close') stopPicking();
     });
     document.body.appendChild(bar);
   };

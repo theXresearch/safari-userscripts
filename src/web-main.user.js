@@ -1,11 +1,11 @@
 // ==UserScript==
 // @name         Web Main
 // @namespace    https://github.com/theXresearch/safari-userscripts
-// @version      2026.11.05.3
+// @version      2026.11.05.4
 // @author       theXresearch
 // @updateURL    https://raw.githubusercontent.com/theXresearch/safari-userscripts/main/src/web-main.user.js
 // @downloadURL  https://raw.githubusercontent.com/theXresearch/safari-userscripts/main/src/web-main.user.js
-// @description  일반 사이트 영상: PiP·화질·속도 버튼(영상 아래), 두 번 탭·가로 회전 전체화면(탭하면 진행 막대, 밀어서 이동·밝기), 벌려서 확대, 두 손가락 톡 PiP / 복사 방지 해제, 다크 모드 (광고는 web-adblock)
+// @description  일반 사이트: ⚙ 설정·작동 상태 / 영상: PiP·화질·속도 버튼(영상 아래), 두 번 탭·가로 회전 전체화면(탭하면 진행 막대, 밀어서 이동·밝기), 벌려서 확대, 두 손가락 톡 PiP / 복사 방지 해제, 다크 모드 (광고는 web-adblock)
 // @match        *://*/*
 // @exclude      *://*.youtube.com/*
 // @run-at       document-start
@@ -24,15 +24,23 @@
   const NO_COPY_FIX = ['docs.google.com', 'notion.so', 'notion.site', 'figma.com', 'office.com', 'icloud.com'];
   const NO_DARK = [];
 
+  // ================= 설정 (영상 버튼 줄·🚫 줄의 ⚙, 모든 사이트 공통) =================
+  const VERSION = '2026.11.05.4';
+  const SET = { dark: true, copyFix: true, autoFs: true, pauseHidden: true };
+  const SET_ITEMS = [
+    ['dark', '다크 모드', 'iPhone이 다크 모드일 때 밝은 사이트를 어둡게'],
+    ['copyFix', '복사·선택 방지 해제', '글자 선택·복사를 막은 사이트에서도 가능하게'],
+    ['autoFs', '가로로 돌리면 자동 전체화면', '재생 중인 영상만'],
+    ['pauseHidden', '안 보이는 영상 자동 정지', '숨겨진 채 소리 없이 재생되는 광고 영상 등 (데이터·배터리 절약)']
+  ];
+
   // ================= 1. 복사·선택 방지 해제 =================
   const COPY_CSS = `
     *, *::before, *::after { -webkit-user-select: text !important; user-select: text !important; }
     body { -webkit-touch-callout: default !important; }`;
-  const copyFix = !onSite(NO_COPY_FIX);
-  if (copyFix) {
-    ['copy', 'cut', 'selectstart', 'contextmenu'].forEach(ev =>
-      window.addEventListener(ev, e => e.stopImmediatePropagation(), true));
-  }
+  const copyFix = () => SET.copyFix && !onSite(NO_COPY_FIX);
+  ['copy', 'cut', 'selectstart', 'contextmenu'].forEach(ev =>
+    window.addEventListener(ev, e => { if (copyFix()) e.stopImmediatePropagation(); }, true));
 
   const addStyle = (id, css) => {
     if (document.getElementById(id)) return;
@@ -41,7 +49,10 @@
     s.textContent = css;
     (document.head || document.documentElement).appendChild(s);
   };
-  const ensureStyles = () => { if (copyFix) addStyle('kw-copy', COPY_CSS); };
+  const ensureStyles = () => {
+    if (copyFix()) addStyle('kw-copy', COPY_CSS);
+    else { const c = document.getElementById('kw-copy'); if (c) c.remove(); }
+  };
   ensureStyles();
 
   // ================= 2. 다크 모드 (iPhone이 다크 모드일 때, 밝은 사이트만) =================
@@ -57,7 +68,7 @@
   };
   const applyDark = () => {
     const el = document.getElementById('kw-dark');
-    if (!darkQuery.matches || onSite(NO_DARK)) { if (el) el.remove(); return; }
+    if (!SET.dark || !darkQuery.matches || onSite(NO_DARK)) { if (el) el.remove(); return; }
     if (el || !document.body) return;
     let b = brightness(document.body);
     if (b === null) b = brightness(document.documentElement);
@@ -77,6 +88,8 @@
     try {
       prefs.speed = +(await GM.getValue('speed', 1.3)) || 1.3;
       prefs.quality = String(await GM.getValue('quality', 'auto'));
+      Object.assign(SET, JSON.parse(await GM.getValue('set', '{}')) || {});
+      ensureStyles(); applyDark();
     } catch (e) {}
     shareQuality();
   })();
@@ -210,10 +223,60 @@
         document.querySelectorAll('video').forEach(applySpeed);
         const b = document.getElementById('kw-speed'); if (b) b.textContent = x + 'x';
       });
-    }]
+    }],
+    ['kw-set', () => '⚙', () => openSettings()]
   ];
+  // ----- 설정 화면 + 작동 상태 -----
+  const statusLines = () => {
+    const ds = document.documentElement.dataset, ok = '✓', no = '–', warn = '⚠', L = [];
+    const v = activeVideo(), q = qList();
+    L.push(ds.kwPage ? [ok, 'Web Page 연결됨 (실드·백그라운드 재생·화질)'] : [warn, 'Web Page가 동작하지 않음 — 설치·켜짐 확인']);
+    L.push(ds.kwPage === 'off' ? [no, '이 사이트 실드: 꺼짐 (🚫 줄에서 켜기)'] : [ok, `실드 켜짐 · 막은 광고 창·이동 ${ds.kwStBlocked || 0}번`]);
+    L.push(ds.kwAd ? [ok, `광고 차단 동작 중 · 지운 광고 ${ds.kwStAds || 0}개`] : [warn, 'Web AdBlock이 동작하지 않음 — 설치·켜짐 확인']);
+    if (v && v.readyState > 0) {
+      L.push([ok, `영상 ${v.videoWidth}×${v.videoHeight}${isFinite(v.duration) ? ' · ' + fmtT(v.duration) : ' · 실시간'} · ${v.paused ? '멈춤' : '재생 중'} · ${prefs.speed}x`]);
+      L.push(q.length ? [ok, `고를 수 있는 화질: ${q.map(x => x + 'p').join(', ')}`] : [no, '이 영상은 화질 선택 불가 (Safari 자동)']);
+    } else L.push([no, '재생 중인 영상 없음']);
+    L.push([no, `버전 ${VERSION}`]);
+    return L;
+  };
+  const openSettings = () => {
+    closeMenu();
+    if (document.getElementById('kw-settings')) return;
+    const mk = (tag, css, ...kids) => { const e = document.createElement(tag); e.style.cssText = css; e.append(...kids); return e; };
+    const sheet = mk('div', 'position:absolute;left:0;right:0;bottom:0;max-height:85vh;overflow:auto;background:#1c1c1e;color:#fff;' +
+      'border-radius:16px 16px 0 0;padding:14px 16px calc(16px + env(safe-area-inset-bottom));font:15px -apple-system,sans-serif;text-align:left;',
+      mk('div', 'font:700 18px -apple-system,sans-serif;margin-bottom:8px', '설정 (모든 사이트)'));
+    const wrap = mk('div', 'position:fixed;inset:0;z-index:2147483647;background:rgba(0,0,0,.55);', sheet);
+    wrap.id = 'kw-settings';
+    SET_ITEMS.forEach(([k, label, desc]) => {
+      const sw = mk('button', '', '');
+      const paint = () => { sw.textContent = SET[k] ? '켜짐' : '꺼짐';
+        sw.style.cssText = `min-width:58px;padding:6px 10px;border:none;border-radius:14px;font:600 13px -apple-system,sans-serif;color:#fff;background:${SET[k] ? '#30d158' : '#48484a'}`; };
+      paint();
+      sw.addEventListener('click', () => {
+        SET[k] = !SET[k];
+        try { GM.setValue('set', JSON.stringify(SET)); } catch (e) {}
+        paint(); ensureStyles(); applyDark();
+      });
+      sheet.appendChild(mk('div', 'display:flex;align-items:center;gap:12px;padding:10px 0;border-top:1px solid #333',
+        mk('div', 'flex:1', mk('div', '', label), mk('div', 'color:#999;font-size:12px;margin-top:2px', desc)), sw));
+    });
+    const statBox = mk('div', 'margin-top:12px;padding:10px 12px;border-radius:10px;background:#2c2c2e;font:13px/1.55 -apple-system,sans-serif');
+    statBox.id = 'kw-stat';
+    const paintStat = () => statBox.replaceChildren(mk('div', 'font-weight:700;margin-bottom:4px', '작동 상태 (이 페이지)'),
+      ...statusLines().map(([i, t]) => mk('div', `color:${i === '⚠' ? '#ffd60a' : i === '✓' ? '#fff' : '#999'}`, `${i} ${t}`)));
+    paintStat();
+    const timer = setInterval(() => { if (!wrap.isConnected) clearInterval(timer); else paintStat(); }, 1000);
+    const close = mk('button', 'width:100%;margin-top:10px;padding:11px;border:none;border-radius:10px;background:#3a3a3c;color:#fff;font:600 15px -apple-system,sans-serif', '닫기');
+    close.addEventListener('click', () => wrap.remove());
+    wrap.addEventListener('click', e => { if (e.target === wrap) wrap.remove(); });
+    sheet.append(statBox, close);
+    document.body.appendChild(wrap);
+  };
+  document.addEventListener('kw-open-settings', () => openSettings());   // 🚫 줄의 '⚙ 설정' (web-adblock)
   // 화면에 보이지 않는데 소리 없이 계속 재생되는 영상(숨겨진 광고 영상 등)은 멈춤 → 데이터·배터리 절약
-  const pauseHidden = () => document.querySelectorAll('video').forEach(v => {
+  const pauseHidden = () => SET.pauseHidden && document.querySelectorAll('video').forEach(v => {
     if (v.paused || !v.muted || v === pseudoFs.video() || v.webkitPresentationMode === 'picture-in-picture') return;
     const r = v.getBoundingClientRect();
     if ((r.width < 2 || r.height < 2) && v.videoWidth < 640) v.pause();   // 본 영상(고화질)은 제외
@@ -581,6 +644,7 @@
     rotTimer = 0;
     const wide = innerWidth > innerHeight;
     if (wide && landscape.matches) {
+      if (!SET.autoFs) return;
       const v = activeVideo();
       if (!pseudoFs.video() && v && !v.paused && v.videoWidth >= 400) {   // 재생 중인 본 영상만 (작은 광고 영상 제외)
         resetZoom(); pseudoFs.enter(v); autoFs = true; setTimeout(updateVideos, 50);
