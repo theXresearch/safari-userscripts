@@ -13,7 +13,7 @@ function load(ids, label, opts = {}) {
   // 첫 6개만 화면 안에 보임
   [...w.document.querySelectorAll('ytm-rich-item-renderer, ytm-reel-item-renderer')].forEach((e, i) =>
     e.getBoundingClientRect = () => ({ height: 100, top: i * 100, bottom: i * 100 + 100 }));
-  const f = new w.Function('loadJson', 'Date', 'innerHeight', 'location', 'document', 'localStorage', block + '; return freshFeed;')(
+  const f = new w.Function('SET', 'loadJson', 'Date', 'innerHeight', 'location', 'document', 'localStorage', block + '; return freshFeed;')({ fresh: true },
     (k, d) => { try { return JSON.parse(w.localStorage.getItem(k)) || d; } catch (e) { return d; } },
     { now: () => clock }, 600, w.location, w.document, w.localStorage);
   f(); f();

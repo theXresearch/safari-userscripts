@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YT Page
 // @namespace    https://github.com/theXresearch/safari-userscripts
-// @version      2026.11.05
+// @version      2026.11.05.2
 // @author       theXresearch
 // @updateURL    https://raw.githubusercontent.com/theXresearch/safari-userscripts/main/src/yt-page.user.js
 // @downloadURL  https://raw.githubusercontent.com/theXresearch/safari-userscripts/main/src/yt-page.user.js
@@ -39,9 +39,11 @@
   // ================= 1-2. 광고 미리 빼기 (uBlock·AdGuard의 json-prune 방식) =================
   // YouTube가 영상 정보와 함께 보내는 '광고 일정'(adPlacements·playerAds·adSlots)을 플레이어가 읽기 전에 지움
   // → 광고가 아예 예약되지 않음. 영상 자체에 붙여 보내는 광고(SSAP)는 못 빼므로 yt-main의 '건너뛰기'가 계속 대비.
-  // 끄기: localStorage krPrune = 'off'  (YouTube가 광고 차단 경고를 띄우면 끄면 됨)
+  // 끄기: ⚙ 설정 → '광고 일정 미리 빼기' (YouTube가 광고 차단 경고를 띄우면 끄면 됨)
   const AD_KEYS = ['adPlacements', 'playerAds', 'adSlots', 'adBreakHeartbeatParams'];
-  const pruneOn = (() => { try { return localStorage.getItem('krPrune') !== 'off'; } catch (e) { return true; } })();
+  // 설정(yt-main의 ⚙): localStorage krSet = { prune, origAudio, ... }
+  const setting = k => { try { const o = JSON.parse(localStorage.getItem('krSet')) || {}; return o[k] !== false; } catch (e) { return true; } };
+  const pruneOn = setting('prune') && (() => { try { return localStorage.getItem('krPrune') !== 'off'; } catch (e) { return true; } })();
   const prune = o => {
     if (!o || typeof o !== 'object') return o;
     [o, o.playerResponse, o.response && o.response.playerResponse].forEach(t => {
@@ -203,7 +205,7 @@
   // 바꾸는 순간 iPhone이 재생을 멈추는 경우가 있어, 재생 중이었다면 바로 다시 재생.
   let audioFor = '', audioTries = 0;
   const fixAudio = (p, v) => {
-    if (!p.getAvailableAudioTracks || !p.setAudioTrack || !p.getVideoData) return;
+    if (!p.getAvailableAudioTracks || !p.setAudioTrack || !p.getVideoData || !setting('origAudio')) return;
     const id = (p.getVideoData() || {}).video_id || '';
     if (!id || !v || v.paused || isAd(p)) return;
     if (audioFor !== id) { audioFor = id; audioTries = 0; }
@@ -250,6 +252,8 @@
       root().dataset.krD = p.getDuration ? p.getDuration() : 0;
       const v = p.querySelector('video') || document.querySelector('video');
       updateSession(p, v);
+      const ch = (p.getVideoData && (p.getVideoData() || {}).author) || '';
+      if (ch && root().dataset.krChan !== ch) root().dataset.krChan = ch;   // yt-main 채널별 속도용
       if (tick % 2 === 0 && !document.hidden) fixAudio(p, v);   // 1초마다, 화면이 보일 때만
     } catch (e) {}
   }, 500);

@@ -8,6 +8,8 @@ const EXPECT = {
   // ── YouTube ──
   pw_phase1: [/initial PR keys: videoDetails/, /fetch player pruned: \{"streamingData"/, /SB url uses prefix: true/,
               /player log: audio en-orig \| play \| seek 20/, /marks on progress bar: 1/, /errors: \[\]/],
+  pw_settings: [/buttons: PiP,240p,1\.25x,⚙/, /chan speeds: \{"강의채널":1\.5\}/, /other channel label: 1\.25x/,
+                /back to 강의채널 label: 1\.5x/, /after off: like= inline endcard= block/, /errors: \[\]/],
   pw_ytmenu: [/menu: 자동 \| 1080p/, /after pick: quality::hd720/, /speed menu: .*✓ 1\.25x/],
   pw_fetchdates: [/모은 게시일: \{"NEWVIDEO001":"2일 전"\}/],
   pw_avatar: [/목록 로고: 숨김 \| 시청화면 채널 로고: 숨김 \| 영상 썸네일: 보임/],

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YT Main
 // @namespace    https://github.com/theXresearch/safari-userscripts
-// @version      2026.11.05
+// @version      2026.11.05.2
 // @author       theXresearch
 // @updateURL    https://raw.githubusercontent.com/theXresearch/safari-userscripts/main/src/yt-main.user.js
 // @downloadURL  https://raw.githubusercontent.com/theXresearch/safari-userscripts/main/src/yt-main.user.js
@@ -37,9 +37,30 @@
   const SEEN_DAYS = 7;                     // 숨긴 영상은 7일 뒤 다시 보이게 (기록 초기화)
 
   const html = document.documentElement;
-  // 저장된 속도가 YouTube 값이 아니면(예전 1.3배 등) 가장 가까운 YouTube 값으로. 기본 1.25배
-  const getSpeed = () => { const s = +localStorage.getItem('krSpeed') || 1.25;
-    return SPEEDS.reduce((a, b) => (Math.abs(b - s) < Math.abs(a - s) ? b : a)); };
+  const loadJson = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) || d; } catch (e) { return d; } };
+
+  // ================= 설정 (⚙ 버튼으로 켜고 끔, yt-page도 같은 값을 읽음) =================
+  const SET = Object.assign({ prune: true, origAudio: true, sb: true, chanSpeed: true, fresh: true, rest: true, tidy: true, endCards: true },
+    loadJson('krSet', {}));
+  const applySet = () => {   // CSS로 처리하는 항목은 <html> 표시로 켜고 끔
+    if (SET.tidy) html.dataset.krTidy = '1'; else delete html.dataset.krTidy;
+    if (SET.endCards) html.dataset.krEndcards = '1'; else delete html.dataset.krEndcards;
+  };
+  applySet();
+
+  // 속도: 채널별로 기억(설정에서 켠 경우) → 없으면 전체 속도. 저장값은 가장 가까운 YouTube 속도로. 기본 1.25배
+  const chanSpeeds = loadJson('krChanSpeed', {});
+  const nearest = s => SPEEDS.reduce((a, b) => (Math.abs(b - s) < Math.abs(a - s) ? b : a));
+  const chan = () => html.dataset.krChan || '';   // 지금 영상의 채널 이름 (yt-page가 알려 줌)
+  const getSpeed = () => nearest((SET.chanSpeed && chanSpeeds[chan()]) || +localStorage.getItem('krSpeed') || 1.25);
+  const setSpeed = x => {
+    if (SET.chanSpeed && chan()) {
+      chanSpeeds[chan()] = x;
+      const k = Object.keys(chanSpeeds);
+      if (k.length > 300) delete chanSpeeds[k[0]];   // 오래된 것부터 정리
+      localStorage.setItem('krChanSpeed', JSON.stringify(chanSpeeds));
+    } else localStorage.setItem('krSpeed', x);
+  };
   const getQuality = () => localStorage.getItem('krQuality') || 'small';   // 기본 240p (없으면 360p)
   const isShorts = () => location.pathname.startsWith('/shorts/');
   const vidId = () => new URLSearchParams(location.search).get('v');
@@ -50,7 +71,6 @@
   const every = (ms, fn) => setInterval(() => { try { fn(); } catch (e) {} }, ms);
   // 화면 정리처럼 '보일 때만' 필요한 작업용: 화면이 꺼져 있거나 다른 앱에 있으면 쉼 (재생·다음 영상 기능은 every로 계속)
   const look = (ms, fn) => every(ms, () => { if (!document.hidden) fn(); });
-  const loadJson = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) || d; } catch (e) { return d; } };
   // 화면 요소 만들기: YouTube는 보안 정책(Trusted Types)으로 innerHTML을 막으므로 요소를 직접 만듦
   const h = (tag, css, ...kids) => {
     const e = document.createElement(tag);
@@ -140,11 +160,16 @@
     .ytmBadgeAndBylineRendererItemByline:has(> [aria-label^="조회수"], > [aria-label*=" views"]),
     .ytmBadgeAndBylineRendererSeparator:has(+ .ytmBadgeAndBylineRendererItemByline > [aria-label^="조회수"]),
     .ytmBadgeAndBylineRendererSeparator:has(+ .ytmBadgeAndBylineRendererItemByline > [aria-label*=" views"]),
-    .slim-video-information-like-count,
-    .slim-video-information-upload-info > .slim-video-subtitle-substring:has(> [aria-label^="조회수"], > [aria-label*=" views"]),
-    /* 시청 화면: 좋아요·싫어요 버튼, 댓글 미리보기 (안 쓰는 기능) */
-    like-button-view-model, dislike-button-view-model, segmented-like-dislike-button-view-model,
-    yt-video-metadata-carousel-view-model:has(comments-entry-point-teaser-view-model), comments-entry-point-teaser-view-model
+    .slim-video-information-upload-info > .slim-video-subtitle-substring:has(> [aria-label^="조회수"], > [aria-label*=" views"])
+    { display: none !important; }
+    /* [설정: 화면 정리] 시청 화면의 좋아요 수·좋아요/싫어요 버튼·댓글 미리보기 */
+    html[data-kr-tidy] :is(.slim-video-information-like-count, like-button-view-model, dislike-button-view-model,
+      segmented-like-dislike-button-view-model, comments-entry-point-teaser-view-model,
+      yt-video-metadata-carousel-view-model:has(comments-entry-point-teaser-view-model))
+    { display: none !important; }
+    /* [설정: 끝 화면 카드] 영상 끝·도중에 영상 위로 뜨는 추천 카드·정보 카드 */
+    html[data-kr-endcards] :is(.ytp-ce-element, .ytp-ce-covering-overlay, .ytp-cards-teaser, .ytp-cards-button,
+      .ytp-endscreen-content, .ytp-videowall-still, .iv-branding)
     { display: none !important; }
     /* 시청 화면: YouTube가 칩 줄을 영상 밑에 붙이려고 '제목·버튼·목록 전체를 감싼 상자'를 위로 끌어올림(translateY -48px)
        → 제목이 영상 뒤로 숨고 칩 줄이 제목을 덮음 (진단으로 확인, 2026-10). 끌어올리지 못하게 고정 */
@@ -154,8 +179,8 @@
     /* 시청 화면: 상단 바의 'YouTube' 글자 로고를 ▶ 아이콘만 남겨 버튼 묶음(PiP·화질·속도) 자리를 만듦 */
     html[data-kr-watch] ytm-home-logo { width: 34px !important; min-width: 0 !important; overflow: hidden !important; flex: none !important; }
     html[data-kr-watch] ytm-home-logo .mobile-topbar-logo { flex: none !important; }
-    /* 채널 로고: 나타나는 즉시 안 보이게 (자리는 아래 hideAvatars가 정리) */
-    :is(img[src*="yt3.ggpht.com"], img[src*="yt3.googleusercontent.com"]):not(ytm-pivot-bar-renderer *, ytm-topbar-menu-button-renderer *)
+    /* [설정: 화면 정리] 채널 로고: 나타나는 즉시 안 보이게 (자리는 아래 hideAvatars가 정리) */
+    html[data-kr-tidy] :is(img[src*="yt3.ggpht.com"], img[src*="yt3.googleusercontent.com"]):not(ytm-pivot-bar-renderer *, ytm-topbar-menu-button-renderer *)
     { visibility: hidden !important; }`;
   const ensureCss = () => {
     if (document.getElementById('kr-css')) return;
@@ -251,6 +276,7 @@
   const trackBreak = (v, ad) => {
     const now = Date.now(), dt = Math.min(now - lastTick, 2000);   // 화면 꺼짐 등으로 멈춘 시간은 세지 않음
     lastTick = now;
+    if (!SET.rest) { if (resting) endRest(); return; }             // 설정에서 끔
     const playing = v && !v.paused && !v.ended;
     if (resting) {
       if (!playing) return;
@@ -294,7 +320,7 @@
     return m && m[1];
   };
   const freshFeed = () => {
-    if (location.pathname !== '/') return;
+    if (!SET.fresh || location.pathname !== '/') return;
     const now = Date.now();
     const items = new Set([...document.querySelectorAll(FEED_ITEM)].map(e => e.closest('ytm-rich-item-renderer') || e));
     items.forEach(el => {
@@ -388,7 +414,7 @@
 
   // 시청 화면 '댓글' 칸 숨김 (이름표가 '댓글'인 칸만 정확히)
   const hideComments = () => {
-    if (!vidId()) return;
+    if (!SET.tidy || !vidId()) return;
     document.querySelectorAll('h2.ytCarouselTitleViewModelTitle, yt-carousel-title-view-model h2').forEach(t => {
       if (/^(댓글|Comments)/i.test((t.textContent || '').trim())) {
         const box = t.closest('yt-video-metadata-carousel-view-model');
@@ -453,7 +479,7 @@
   // 아래쪽 메뉴의 '내 페이지' 아이콘(내 계정)은 그대로 둠.
   const AVATAR_IMG = 'img[src*="yt3.ggpht.com"], img[src*="yt3.googleusercontent.com"]';
   const KEEP_AVATAR = 'ytm-pivot-bar-renderer, ytm-topbar-menu-button-renderer';
-  const hideAvatars = () => document.querySelectorAll(AVATAR_IMG).forEach(img => {
+  const hideAvatars = () => SET.tidy && document.querySelectorAll(AVATAR_IMG).forEach(img => {
     if (img.__krAv || img.closest(KEEP_AVATAR)) return;
     const r = img.getBoundingClientRect();
     if (!r.width) return;                          // 아직 화면에 그려지지 않음 → 다음에 다시
@@ -853,7 +879,9 @@
 
     // 스폰서 구간 정보 받기 (건너뛰기는 YouTube 자체 기능으로 yt-page가 처리하므로 yt-page가 있을 때만)
     const id = vidId();
-    if (id && html.dataset.krPage && sbFor !== id) loadSB(id);
+    if (!SET.sb) { sbFor = null; sbSegs = []; delete html.dataset.krSb; }
+    else if (id && html.dataset.krPage && sbFor !== id) loadSB(id);
+    applySpeed(active);   // 채널이 바뀌어 속도가 다르면 맞춤 (재생 중일 때만)
   });
 
   // 가벼운 화면 정리는 2초마다
@@ -936,6 +964,7 @@
       'display:flex;flex-direction:column;min-width:76px;box-shadow:0 4px 16px rgba(0,0,0,.5);');
     m.id = 'kr-menu';
     items.forEach(([val, text]) => {
+      if (val === null) return m.appendChild(h('div', 'color:#aaa;font:12px -apple-system,sans-serif;padding:6px 14px 2px', text));   // 안내 줄
       const on = String(val) === String(current);
       const it = h('button', 'background:none;border:none;color:' + (on ? '#4da3ff' : '#fff') +
         ';font:600 15px -apple-system,sans-serif;padding:9px 14px;text-align:left;', (on ? '✓ ' : '') + text);
@@ -963,13 +992,56 @@
       });
     }],
     ['kr-speed', () => getSpeed() + 'x', () => {
-      openMenu(document.getElementById('kr-speed'), SPEEDS.map(x => [x, x + 'x']), getSpeed(), x => {
-        localStorage.setItem('krSpeed', x);
+      const caption = SET.chanSpeed && chan() ? [[null, `'${chan().slice(0, 14)}' 채널에 기억`]] : [];
+      openMenu(document.getElementById('kr-speed'), caption.concat(SPEEDS.map(x => [x, x + 'x'])), getSpeed(), x => {
+        setSpeed(x);
         applySpeed(activeVideo());
         const b = document.getElementById('kr-speed'); if (b) b.textContent = x + 'x';
       });
-    }]
+    }],
+    ['kr-set', () => '⚙', () => openSettings()]
   ];
+  // ----- 설정 화면 (⚙) -----
+  const SET_ITEMS = [
+    ['prune', '광고 일정 미리 빼기', '광고가 아예 예약되지 않게 함. YouTube가 광고 차단 경고를 띄우면 끄세요', true],
+    ['origAudio', '자동 더빙 끄기', 'AI 더빙 대신 원래 음성으로'],
+    ['sb', '스폰서 구간 건너뛰기', '광고·홍보·인트로 등 (SponsorBlock)'],
+    ['chanSpeed', '채널별 속도 기억', '속도를 고르면 그 채널에만 적용'],
+    ['fresh', '홈: 본 영상·반복 영상 숨김', '새 영상이 위로', true],
+    ['rest', '1시간 연속 재생 시 휴식', ''],
+    ['tidy', '좋아요·댓글·채널 로고 숨김', '', true],
+    ['endCards', '영상 위 추천·정보 카드 숨김', '']
+  ];
+  const openSettings = () => {
+    closeMenu();
+    if (document.getElementById('kr-settings')) return;
+    const sheet = h('div', 'position:absolute;left:0;right:0;bottom:0;max-height:85vh;overflow:auto;background:#1c1c1e;color:#fff;' +
+      'border-radius:16px 16px 0 0;padding:14px 16px calc(16px + env(safe-area-inset-bottom));font:15px -apple-system,sans-serif;',
+      h('div', 'font:700 18px -apple-system,sans-serif;margin-bottom:8px', '설정'));
+    const wrap = h('div', 'position:fixed;inset:0;z-index:2147483647;background:rgba(0,0,0,.55);', sheet);
+    wrap.id = 'kr-settings';
+    const reloadBtn = h('button', 'display:none;width:100%;margin-top:10px;padding:11px;border:none;border-radius:10px;background:#0a84ff;color:#fff;font:600 15px -apple-system,sans-serif', '새로고침해서 적용');
+    reloadBtn.addEventListener('click', () => location.reload());
+    SET_ITEMS.forEach(([k, label, desc, reload]) => {
+      const sw = h('button', '', '');
+      const paint = () => { sw.textContent = SET[k] ? '켜짐' : '꺼짐';
+        sw.style.cssText = `min-width:58px;padding:6px 10px;border:none;border-radius:14px;font:600 13px -apple-system,sans-serif;color:#fff;background:${SET[k] ? '#30d158' : '#48484a'}`; };
+      paint();
+      sw.addEventListener('click', () => {
+        SET[k] = !SET[k];
+        localStorage.setItem('krSet', JSON.stringify(SET));
+        applySet(); paint();
+        if (reload) reloadBtn.style.display = 'block';
+      });
+      sheet.appendChild(h('div', 'display:flex;align-items:center;gap:12px;padding:10px 0;border-top:1px solid #333',
+        h('div', 'flex:1', h('div', '', label + (reload ? ' *' : '')), desc ? h('div', 'color:#999;font-size:12px;margin-top:2px', desc) : ''), sw));
+    });
+    const close = h('button', 'width:100%;margin-top:10px;padding:11px;border:none;border-radius:10px;background:#3a3a3c;color:#fff;font:600 15px -apple-system,sans-serif', '닫기');
+    close.addEventListener('click', () => wrap.remove());
+    wrap.addEventListener('click', e => { if (e.target === wrap) wrap.remove(); });
+    sheet.append(h('div', 'color:#999;font-size:12px;margin-top:8px', '* 표시는 새로고침 후 적용'), reloadBtn, close);
+    document.body.appendChild(wrap);
+  };
   const ensureBar = () => {
     if (!document.body || document.getElementById('kr-bar')) return;
     const bar = h('div', 'position:fixed;z-index:2147483647;display:none;gap:4px;');
@@ -986,8 +1058,8 @@
   // 1초마다: 작업별로 따로 실행 (하나가 오류 나도 나머지는 계속)
   look(1000, () => {
     ensureBar();
-    const b = document.getElementById('kr-pip'), t = pip.active() ? '복귀' : 'PiP';
-    if (b && b.textContent !== t) b.textContent = t;
+    // 버튼 글자 갱신 (PiP 상태, 영상·채널이 바뀌어 달라진 화질·속도)
+    BUTTONS.forEach(([id, label]) => { const b = document.getElementById(id), t = label(); if (b && b.textContent !== t) b.textContent = t; });
   });
   look(1000, freshFeed);
   look(1000, () => { trimViews(); addDates(); });
