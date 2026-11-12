@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Web Save
 // @namespace    https://github.com/theXresearch/safari-userscripts
-// @version      2026.11.12.5
+// @version      2026.11.12.6
 // @author       theXresearch
 // @updateURL    https://raw.githubusercontent.com/theXresearch/safari-userscripts/main/src/web-save.meta.js
 // @downloadURL  https://raw.githubusercontent.com/theXresearch/safari-userscripts/main/src/web-save.user.js
@@ -442,8 +442,11 @@
     window.addEventListener('message', onMsg);
   };
   // 화면 아래 띠: '✓ 받기 완료 n개 — 🎬 영상보기에 넣기'
+  // ✕로 닫으면 이 영상들에 대해서는 다시 띄우지 않음 (⬇ 버튼의 '🎬 n'으로 언제든 넣기)
+  const barOff = new Set((() => { try { return JSON.parse(sessionStorage.getItem('kwBarOff')) || []; } catch (e) { return []; } })());
   const libBar = pend => {
     let bar = document.getElementById('kw-savelib');
+    pend = pend.filter(j => !barOff.has(j.id));
     if (!pend.length || !document.body) { if (bar) bar.remove(); return; }
     if (!bar) {
       bar = mk('div', 'position:fixed;left:10px;right:10px;bottom:calc(14px + env(safe-area-inset-bottom));z-index:2147483647;display:flex;align-items:center;gap:10px;' +
@@ -451,7 +454,13 @@
       bar.id = 'kw-savelib';
       const t = mk('div', 'flex:1');
       const go = btn('🎬 영상보기에 넣기', () => { bar.remove(); sendToLibrary(); }, '#0a84ff');
-      bar.append(t, go);
+      const x = btn('✕', () => {
+        pend.forEach(j => barOff.add(j.id));
+        try { sessionStorage.setItem('kwBarOff', JSON.stringify([...barOff])); } catch (e) {}
+        bar.remove();
+      });
+      x.style.background = 'none';
+      bar.append(t, go, x);
       document.body.appendChild(bar);
     }
     bar.firstChild.textContent = `✓ 받기 완료 ${pend.length}개`;
