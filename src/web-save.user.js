@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Web Save
 // @namespace    https://github.com/theXresearch/safari-userscripts
-// @version      2026.11.12.2
+// @version      2026.11.12.3
 // @author       theXresearch
 // @updateURL    https://raw.githubusercontent.com/theXresearch/safari-userscripts/main/src/web-save.meta.js
 // @downloadURL  https://raw.githubusercontent.com/theXresearch/safari-userscripts/main/src/web-save.user.js
@@ -444,6 +444,7 @@
   };
 
   // 작업 만들기 (c = 찾은 영상, v = 고른 화질)
+  // 지금 보는 영상이 아닌 것(같은 페이지에서 함께 잡힌 다른 영상)은 제목 뒤에 길이를 붙여 구분
   const newJob = async (c, v) => {
     const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
     const base = { id, src: c.u, page: location.href, created: Date.now(), done: 0, bytes: 0, state: 'pause', net: 'page', name: videoTitle(), h: v ? v.h : 0 };
@@ -453,6 +454,7 @@
     if (pl.master) throw new Error('재생 목록 구조가 예상과 다름');
     if (pl.live) throw new Error('실시간 방송은 받을 수 없음 (끝이 정해진 영상만)');
     if (!pl.segs.length) throw new Error('영상 조각이 없음');
+    if (c.main === false) base.name += ` (${fmtT(pl.dur)})`;
     return Object.assign(base, { kind: 'hls', url, segs: pl.segs, map: pl.map, dur: pl.dur, total: pl.segs.length });
   };
   // 기본 화질 고르기: 설정한 화질 이하에서 가장 좋은 것 (없으면 가장 낮은 것), 0 = 가장 좋은 화질
@@ -488,26 +490,45 @@
 
   // ================= 7. 이 페이지의 영상 찾기 =================
   const fromFrames = new Map();        // iframe 안 플레이어가 알려 준 주소
+  const frameDurs = new Map();         // iframe별 재생한 영상 길이
   window.addEventListener('message', e => {
     const d = e.data;
     if (d && Array.isArray(d.kwMedia)) d.kwMedia.forEach(m => { if (m && typeof m.u === 'string' && /^https?:/.test(m.u)) fromFrames.set(m.u, m); });
+    if (d && Array.isArray(d.kwDur)) frameDurs.set(e.source, d.kwDur.filter(x => typeof x === 'number'));
   });
+  // 사용자가 재생한 영상의 길이 (이 페이지 + iframe 안)
+  const watchedDurs = () => {
+    const out = [];
+    try { out.push(...JSON.parse(ROOT.dataset.kwDur || '[]')); } catch (e) {}
+    frameDurs.forEach(a => out.push(...a));
+    return out;
+  };
+  const sameLen = (a, b) => Math.abs(a - b) <= Math.max(3, b * 0.01);
   const parsed = new Map();            // 재생 목록 주소 → 읽은 결과 (Promise)
   const candidates = () => {
     const all = new Map();
-    const add = (u, t, at) => { if (u && /^https?:/.test(u) && !all.has(u)) all.set(u, { u, t, at: at || 0 }); };
-    try { JSON.parse(ROOT.dataset.kwMedia || '[]').forEach(m => add(m.u, m.t, m.at)); } catch (e) {}
-    fromFrames.forEach(m => add(m.u, m.t, m.at));
+    const add = (u, t, at, v) => {
+      if (!u || !/^https?:/.test(u)) return;
+      if (all.has(u)) { if (v) all.get(u).v = 1; } else all.set(u, { u, t, at: at || 0, v: v ? 1 : 0 });
+    };
+    try { JSON.parse(ROOT.dataset.kwMedia || '[]').forEach(m => add(m.u, m.t, m.at, m.v)); } catch (e) {}
+    fromFrames.forEach(m => add(m.u, m.t, m.at, m.v));
     document.querySelectorAll('video, video source').forEach(v => {
       const s = v.currentSrc || v.src || '';
-      if (s && !/^blob:/.test(s)) add(s, /m3u8/i.test(s) ? 'hls' : 'file', Date.now());
+      if (s && !/^blob:/.test(s)) add(s, /m3u8/i.test(s) ? 'hls' : 'file', Date.now(), !v.paused || v.currentTime > 1);
     });
     try { performance.getEntriesByType('resource').forEach(r => { if (/\.m3u8([?#]|$)/i.test(r.name)) add(r.name, 'hls', r.startTime); }); } catch (e) {}
     return [...all.values()];
   };
   const inspect = c => {
     if (c.t !== 'hls') return Promise.resolve(null);
-    if (!parsed.has(c.u)) parsed.set(c.u, getText(c.u).then(t => parseM3u8(t, c.u)).catch(e => ({ error: e.message })));
+    if (!parsed.has(c.u)) parsed.set(c.u, getText(c.u).then(t => parseM3u8(t, c.u)).then(async p => {
+      if (p.master && p.variants[0]) {     // 화질 목록이면 한 화질의 목록을 읽어 영상 길이를 알아 둠
+        const v = await inspect({ u: p.variants[0].u, t: 'hls' });
+        if (v && !v.error) { p.dur = v.dur; p.live = v.live; }
+      }
+      return p;
+    }).catch(e => ({ error: e.message })));
     return parsed.get(c.u);
   };
   // 화면에 보여 줄 목록: 화질 목록(master)에 들어 있는 개별 화질 주소는 따로 보이지 않게
@@ -518,8 +539,15 @@
     info.forEach(p => p && p.master && p.variants.forEach(v => { inMaster.add(v.u); if (v.audioUrl) inMaster.add(v.audioUrl); }));
     // 재생 목록 안의 조각·머리 파일(init.mp4, 조각 .mp4)은 따로 보이지 않게
     info.forEach(p => { if (p && p.segs) { p.segs.forEach(x => inMaster.add(x.u)); if (p.map) inMaster.add(p.map.u); } });
-    return cs.map((c, i) => ({ c, p: info[i] })).filter(x => !inMaster.has(x.c.u))
+    const list = cs.map((c, i) => ({ c, p: info[i] })).filter(x => !inMaster.has(x.c.u))
       .sort((a, b) => (b.p && b.p.master ? 1 : 0) - (a.p && a.p.master ? 1 : 0) || b.c.at - a.c.at);
+    // 지금 보는 영상 = 재생 중인 영상이 실제로 쓰는 주소, 또는 재생한 영상과 길이가 같은 재생 목록
+    // (같은 페이지에서 함께 잡힌 다른 영상·미리보기·광고·이전 페이지 영상은 '다른 영상'으로 따로)
+    const durs = watchedDurs();
+    list.forEach(x => { x.main = !!x.c.v || (!!x.p && !!x.p.dur && durs.some(d => sameLen(x.p.dur, d))); });
+    if (!list.some(x => x.main)) list.forEach(x => { x.main = true; });   // 판단할 정보가 없으면 모두 보여 줌
+    list.forEach(x => { x.c.main = x.main; });
+    return list;
   };
   const mainDuration = () => {
     const v = [...document.querySelectorAll('video')].sort((a, b) => b.videoWidth - a.videoWidth)[0];
@@ -528,7 +556,7 @@
   // ⬇ 한 번 누름 → 본 영상을 골라 기본 화질로 바로 받기
   // 본 영상 = 화질 목록(master)이 있는 것 > 길이가 가장 긴 재생 목록 > 영상 파일 (짧은 광고 영상은 뒤로)
   const bestOf = list => {
-    const ok = list.filter(x => !x.p || (!x.p.error && !x.p.live));
+    const ok = list.filter(x => x.main && (!x.p || (!x.p.error && !x.p.live)));
     const len = x => (x.p && x.p.master ? mainDuration() || 1e6 : x.p ? x.p.dur : mainDuration());
     return ok.sort((a, b) => ((b.p && b.p.master ? 2 : b.p ? 1 : 0) - (a.p && a.p.master ? 2 : a.p ? 1 : 0)) ||
       ((len(b) >= 30) - (len(a) >= 30)) || (len(b) - len(a)))[0];
@@ -593,6 +621,7 @@
   };
 
   let panel = null, lastSig = '';
+  const showMore = { others: false, settings: false, again: false };   // 접힌 부분 (다른 영상, 설정)
   const jobLine = j => {
     const r = running.get(j.id);
     const speed = r && Date.now() - r.t0 > 1500 ? (j.bytes - r.b0) / ((Date.now() - r.t0) / 1000) : 0;
@@ -680,7 +709,7 @@
     if (!panel || !panel.isConnected) return;
     const [jobs, list] = await Promise.all([DB.jobs().catch(() => []), listing()]);
     const mine = jobs.map(j => (running.get(j.id) || {}).j || j).sort((a, b) => b.created - a.created);
-    const sig = mine.map(j => j.id + j.state + (j.savedAt ? 's' : '')).join() + '|' + list.map(x => x.c.u + (x.p ? 1 : 0)).join();
+    const sig = mine.map(j => j.id + j.state + (j.savedAt ? 's' : '')).join() + '|' + list.map(x => x.c.u + (x.p ? 1 : 0) + (x.main ? 'm' : '')).join() + JSON.stringify(showMore);
     if (!force && sig === lastSig) {        // 진행률만 바뀌었으면 글자·막대만 고침 (누르는 중인 버튼이 사라지지 않게)
       mine.forEach(j => {
         const i = panel.querySelector(`[data-info="${j.id}"]`), b = panel.querySelector(`[data-bar="${j.id}"] > div`);
@@ -695,11 +724,28 @@
     const otherBytes = others.reduce((a, [, v]) => a + (v.bytes || 0), 0);
     const histTotal = hist.reduce((a, h) => a + (h.size || 0), 0);
     const body = panel.querySelector('[data-body]');
+    // 보여 줄 것만: 받는 중·손볼 것 / 지금 보는 영상 / (눌러야 보이는) 함께 잡힌 다른 영상 / 저장 끝난 것은 한 줄로
+    const active = mine.filter(j => j.state !== 'done' || !j.savedAt);
+    const saved = mine.filter(j => j.state === 'done' && j.savedAt);
+    const got = new Set(mine.filter(j => j.state === 'done').map(j => j.src));
+    const mainList = list.filter(x => x.main && !got.has(x.c.u)), otherList = list.filter(x => !x.main && !got.has(x.c.u));
+    const gotMain = list.some(x => x.main && got.has(x.c.u));
+    const fold = (key, title, kids) => {
+      const b = btn((showMore[key] ? '▾ ' : '▸ ') + title, () => { showMore[key] = !showMore[key]; refresh(true); });
+      return mk('div', 'padding:8px 0;border-top:1px solid #333', b, showMore[key] ? mk('div', '', ...kids) : null);
+    };
     body.replaceChildren(
-      H('받기 목록 (이 사이트)'),
-      ...(mine.length ? mine.map(jobView) : [mk('div', 'color:#999;padding:8px 0', '없음 — ⬇를 한 번 누르면 기본 화질로 바로 받습니다')]),
-      H('이 페이지의 영상 · 다른 화질로 받기'),
-      ...(list.length ? list.map(x => candView(x, mine)) : [mk('div', 'color:#999;padding:8px 0', '영상을 찾지 못함 → 영상을 먼저 재생한 뒤 다시 여세요')]),
+      active.length ? H('받는 중') : null,
+      ...active.map(jobView),
+      H('이 영상 받기 · 화질 고르기'),
+      ...(mainList.length ? mainList.map(x => candView(x, mine)) :
+        [mk('div', 'color:#999;padding:8px 0', gotMain ? '✓ 이 영상은 이미 받았습니다' : '영상을 찾지 못함 → 영상을 먼저 재생한 뒤 다시 여세요')]),
+      gotMain ? fold('again', '다른 화질로 다시 받기', list.filter(x => x.main && got.has(x.c.u)).map(x => candView(x, mine))) : null,
+      otherList.length ? fold('others', `이 페이지에서 함께 잡힌 다른 영상 ${otherList.length}개`, otherList.map(x => candView(x, mine))) : null,
+      saved.length ? mk('div', 'display:flex;align-items:center;gap:8px;padding:10px 0;border-top:1px solid #333;color:#aaa;font-size:13px',
+        mk('div', 'flex:1', `✓ 저장한 영상 ${saved.length}개 · 임시 파일은 곧 자동 삭제`),
+        btn('지금 지우기', async () => { for (const j of saved) await remove(j); })) : null,
+      fold('settings', '⚙ 받기 설정 · 정리', [
       H('설정 (모든 사이트)'),
       qualityRow(),
       toggle('oneTap', '⬇ 한 번 누르면 바로 받기', '끄면 누를 때마다 화질을 고르는 화면이 열림'),
@@ -729,7 +775,7 @@
         '이후 이 버튼을 누르면 단축어가 실행되어 저장 폴더의 영상이 모두 지워집니다.']),
       hist.length ? H(`받은 기록 ${hist.length}개 · ${MB(histTotal)}`) : null,
       ...hist.slice(0, 8).map(h => mk('div', 'color:#aaa;font-size:12px;padding:3px 0;word-break:break-all',
-        `${new Date(h.at).toLocaleDateString()} · ${h.name} · ${MB(h.size || 0)} · ${h.site}`)),
+        `${new Date(h.at).toLocaleDateString()} · ${h.name} · ${MB(h.size || 0)} · ${h.site}`))].filter(Boolean)),
       mk('div', NOTE + ';margin-top:12px', '받는 동안 이 페이지를 열어 두세요 (화면은 자동으로 켜져 있음). 중간에 닫혀도 다시 오면 이어받습니다.'));
   }
   const refresh = force => { render(force); updateButton(); };

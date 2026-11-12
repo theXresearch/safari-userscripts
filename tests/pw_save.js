@@ -57,12 +57,19 @@ const serve = (route, file, req, cors, range = true) => {
       const src = u.searchParams.get('src') || '';
       const frame = u.searchParams.get('frame');
       const og = u.searchParams.get('og') || '샘플 영화 ABC-123 정식 제목', src2 = u.searchParams.get('src2') || '';
+      const fake = u.searchParams.get('fake');   // 재생 중인 영상 흉내 (길이 fake초, hls.js처럼 blob 주소)
+      const fakeJs = fake ? `const fv=document.querySelector('video');Object.defineProperties(fv,{paused:{get:()=>false},duration:{get:()=>${+fake}},currentTime:{get:()=>5},readyState:{get:()=>4},currentSrc:{get:()=>'blob:https://site.test/x'}});` : '';
       const html = frame ? `<meta charset="utf-8"><title>틀 안 영상</title><body><iframe src="https://player.test/p?src=${encodeURIComponent(frame)}" width=320 height=180></iframe></body>`
         : `<meta charset="utf-8"><meta property="og:title" content="${og}"><title>${og} - 예시사이트</title><body><video width=320 height=180></video><p>본문</p>
-           <script>${[src, src2].filter(Boolean).map(x => `fetch(${JSON.stringify(x)}).then(r=>r.text()).catch(()=>{});`).join('')}</script></body>`;
+           <script>${fakeJs}${[src, src2].filter(Boolean).map(x => `fetch(${JSON.stringify(x)}).then(r=>r.text()).catch(()=>{});`).join('')}</script></body>`;
       return r.fulfill({ contentType: 'text/html; charset=utf-8', body: html });
     }
     if (slow && /\/(enc|v240|fm)\/s00[3-9]\.(ts|m4s)$/.test(u.pathname)) return setTimeout(() => serve(r, u.pathname.replace(/^\/hls\//, ''), req, true), 4000);
+    if (u.pathname === '/hls/long.m3u8') {   // 같은 조각을 두 번 = 40초짜리 다른 영상
+      const pl = fs.readFileSync(path.join(FX, 'v240/index.m3u8'), 'utf8').split('\n');
+      const segs = pl.filter(l => /^#EXTINF|^s\d/.test(l)).map(l => (l.startsWith('s') ? 'v240/' + l : l));
+      return r.fulfill({ contentType: 'application/vnd.apple.mpegurl', headers: { 'access-control-allow-origin': '*' }, body: ['#EXTM3U', '#EXT-X-TARGETDURATION:2', ...segs, ...segs, '#EXT-X-ENDLIST'].join('\n') });
+    }
     if (u.hostname === 'cdn.test') return serve(r, u.pathname.replace(/^\/hls\//, ''), req, true, !u.pathname.includes('norange'));
     if (u.hostname === 'nocors.test') return serve(r, u.pathname.replace(/^\/hls\//, ''), req, false);
     return r.fulfill({ body: '' });
@@ -111,9 +118,10 @@ const serve = (route, file, req, cors, range = true) => {
       return { f, name: d.suggestedFilename(), ok: true };
     } catch (e) { return { ok: false, f: '', name: '', err: e.message.split('\n')[0] }; }
   };
-  const cleanAll = async () => { await open(); await tap('🧹'); await p.waitForTimeout(800); await close(); };
+  const cleanAll = async () => { await open(); await tap('▸ ⚙'); await p.waitForTimeout(500); await tap('🧹'); await p.waitForTimeout(800); await close(); };
   const jobsLeft = () => p.evaluate(() => new Promise(res => { const r = indexedDB.open('kw-save'); r.onsuccess = () => { const q = r.result.transaction('jobs').objectStore('jobs').getAll(); q.onsuccess = () => res(q.result.length); }; }));
   let s;
+  const jobNames = () => p.evaluate(async () => { const r = indexedDB.open('kw-save'); await new Promise(x => { r.onsuccess = x; }); return new Promise(res => { const q = r.result.transaction('jobs').objectStore('jobs').getAll(); q.onsuccess = () => res(q.result.map(j => j.name).join('|')); }); });
 
   // A. ⬇ 한 번 → 기본 화질(1080 이하 최고 = 360p)로 받고 영상 제목 그대로 자동 저장
   await load('src=' + enc('https://cdn.test/hls/master.m3u8'));
@@ -122,8 +130,11 @@ const serve = (route, file, req, cors, range = true) => {
   console.log('A one tap → auto saved:', s.ok, '|', s.ok ? probe(s.f) : s.err);
   await open();
   let t = await panelText();
-  console.log('A name:', (t.match(/[^\n]*\.mp4(?= ·)/) || [''])[0], '| saved line:', /✓ 저장함 .*임시 파일 \d+분 뒤 자동 삭제/.test(t), '| default ★:', /★ 360p/.test(t));
-  // A2. 다른 화질 고르기 (화면에서 240p) → 그것도 자동 저장
+  const aName = await jobNames();
+  console.log('A name:', aName + '.mp4', '| saved line:', /✓ 저장한 영상 1개/.test(t) && !/다시 저장/.test(t), '| already:', /이 영상은 이미 받았습니다/.test(t));
+  // A2. 다른 화질 고르기 (접힌 '다른 화질로 다시 받기'에서 240p) → 그것도 자동 저장
+  await tap('▸ 다른 화질로'); await p.waitForTimeout(600);
+  console.log('A2 default ★:', /★ 360p/.test(await panelText()));
   s = await autoSaved('A2', () => tap('240p'));
   console.log('A2 other quality:', s.ok, '|', s.ok ? probe(s.f) : s.err);
   // A3. 저장 후 임시 파일 자동 삭제 (시험에서는 4초 + 확인 주기 10초)
@@ -198,16 +209,30 @@ const serve = (route, file, req, cors, range = true) => {
   // M. 긴 제목 → 파일 이름 200바이트 이내, 못 쓰는 글자 제거
   await load('src=' + enc('https://cdn.test/hls/v240/index.m3u8') + '&og=' + enc('가'.repeat(120) + ' a/b:c'));
   await open(); await tap('받기'); await p.waitForTimeout(500);
-  const nm = await p.evaluate(() => (document.querySelector('#kw-savepanel [data-info]') || {}).parentElement.firstChild.textContent);
+  const nm = await jobNames();
   console.log('M long name bytes<=200:', Buffer.byteLength(nm.replace(/\.(mp4|ts)$/, '')) <= 200, '| no slash:', !/[/:]/.test(nm));
   await close(); await cleanAll();
   console.log('M after clean-all jobs:', await jobsLeft());
+
+  // N. 한 페이지에서 두 재생 목록이 잡힘 → 재생 중인 영상(20초)과 길이가 같은 것만 '이 영상', 40초짜리는 접힌 '다른 영상'
+  await load('fake=20&src=' + enc('https://cdn.test/hls/long.m3u8') + '&src2=' + enc('https://cdn.test/hls/v240/index.m3u8'));
+  await p.waitForTimeout(2500);
+  await open();
+  t = await panelText();
+  console.log('N main only:', (t.match(/조각 10개/g) || []).length === 1 && !/조각 20개/.test(t), '| others folded:', /함께 잡힌 다른 영상 1개/.test(t));
+  await close();
+  s = await autoSaved('N', press);
+  console.log('N one tap picks watched:', s.ok, '|', s.ok ? probe(s.f) : s.err);
+  await open(); await tap('▸ 이 페이지에서'); await p.waitForTimeout(600);
+  console.log('N others shown on tap:', /조각 20개/.test(await panelText()));
+  await close(); await cleanAll();
 
   // I. iframe 안 플레이어 → 바깥 페이지 ⬇ 목록에 표시
   await p.goto('https://site.test/x?frame=' + enc('https://cdn.test/hls/v240/index.m3u8'));
   await p.evaluate(MUX); await p.evaluate(S('web-save.user.js'));
   await p.waitForTimeout(1500);
   await open();
+  await tap('▸ ⚙'); await p.waitForTimeout(600);
   t = await panelText();
   console.log('I iframe media listed:', /조각 10개/.test(t), '| settings shown:', /기본 화질/.test(t) && /저장 폴더 지정/.test(t) && /받은 영상 모두 삭제/.test(t), '| history:', (t.match(/받은 기록 (\d+)개/) || [])[1]);
   await close();
@@ -216,7 +241,7 @@ const serve = (route, file, req, cors, range = true) => {
   await load('src=' + enc('https://cdn.test/hls/v240/index.m3u8'), false);
   s = await autoSaved('J', press);
   await open();
-  const jName = await p.evaluate(() => { const i = document.querySelector('#kw-savepanel [data-info]'); return i ? i.parentElement.firstChild.textContent : ''; });
+  const jName = 'fmt=' + await p.evaluate(async () => { const r = indexedDB.open('kw-save'); await new Promise(x => { r.onsuccess = x; }); return new Promise(res => { const q = r.result.transaction('jobs').objectStore('jobs').getAll(); q.onsuccess = () => res(q.result.map(j => j.fmt).join()); }); });
   console.log('J no mux:', s.ok, jName, '|', s.ok ? probe(s.f) : s.err);
   await close(); await cleanAll();
   console.log('errors:', JSON.stringify(errors));

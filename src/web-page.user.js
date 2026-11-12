@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Web Page
 // @namespace    https://github.com/theXresearch/safari-userscripts
-// @version      2026.11.12.2
+// @version      2026.11.12.3
 // @author       theXresearch
 // @updateURL    https://raw.githubusercontent.com/theXresearch/safari-userscripts/main/src/web-page.meta.js
 // @downloadURL  https://raw.githubusercontent.com/theXresearch/safari-userscripts/main/src/web-page.user.js
@@ -128,23 +128,28 @@
   // 사이트 플레이어가 불러오는 재생 목록(.m3u8)·영상 파일(.mp4 등) 주소를 적어 둠 (요청 자체는 그대로 통과).
   // 바깥 페이지: <html data-kw-media> / iframe 안: 바깥 페이지로 전달(postMessage)
   const media = [];
-  let mediaTimer = 0;
+  let mediaTimer = 0, durs = [];
+  // durs = 이 화면에서 사용자가 재생한 영상의 길이 → web-save가 '지금 보는 영상'과 길이가 같은 재생 목록만 고름
   const publishMedia = () => {
     mediaTimer = 0;
     try {
-      if (window.top === window.self) document.documentElement.dataset.kwMedia = JSON.stringify(media);
-      else window.top.postMessage({ kwMedia: media }, '*');
+      if (window.top === window.self) {
+        document.documentElement.dataset.kwMedia = JSON.stringify(media);
+        document.documentElement.dataset.kwDur = JSON.stringify(durs);
+      } else window.top.postMessage({ kwMedia: media, kwDur: durs }, '*');
     } catch (e) {}
   };
-  const noteMedia = (url, hint) => {
+  // v = 1: 사용자가 재생한 영상이 실제로 쓰는 주소 (같은 페이지에서 함께 잡힌 다른 영상·미리보기와 구분)
+  const noteMedia = (url, hint, v) => {
     let u;
     try { u = new URL(String(url || ''), location.href).href; } catch (e) { return; }
     if (!/^https?:/.test(u) || /\.(ts|m4s|aac|key|vtt|jpg|png)([?#]|$)/i.test(u) || /\/init[^/]*\.mp4/i.test(u)) return;   // 조각·머리 파일·자막·그림은 제외
     const t = hint || (/\.m3u8|m3u8/i.test(u) ? 'hls' : /\.(mp4|m4v|mov|webm)([?#]|$)/i.test(u) ? 'file' : '');
     if (!t) return;
     const i = media.findIndex(m => m.u === u);
+    if (i >= 0 && (media[i].v || !v)) return;           // 이미 적힌 주소
     if (i >= 0) media.splice(i, 1);
-    media.push({ u, t, at: Date.now(), page: location.href });
+    media.push(Object.assign({ u, t, at: Date.now(), page: location.href }, v ? { v: 1 } : {}));
     if (media.length > 30) media.shift();
     if (!mediaTimer) mediaTimer = setTimeout(publishMedia, 300);
   };
@@ -169,12 +174,16 @@
       return oo.call(this, m, url, ...r);
     };
   } catch (e) {}
-  // 플레이어가 영상 주소를 직접 넣는 경우 (Safari 기본 재생)
+  // 플레이어가 영상 주소를 직접 넣는 경우 (Safari 기본 재생) + 재생한 영상의 길이
+  const watched = v => !v.paused || v.currentTime > 1;
   setInterval(() => {
-    document.querySelectorAll('video, video source').forEach(v => {
+    const d = [];
+    document.querySelectorAll('video').forEach(v => {
       const s = v.currentSrc || v.src || '';
-      if (s && !/^blob:/.test(s)) noteMedia(s, /m3u8/i.test(s) ? 'hls' : 'file');
+      if (s && !/^blob:/.test(s)) noteMedia(s, /m3u8/i.test(s) ? 'hls' : 'file', watched(v));
+      if (watched(v) && isFinite(v.duration) && v.duration > 10) d.push(Math.round(v.duration));
     });
+    if (String(d) !== String(durs)) { durs = d; if (!mediaTimer) mediaTimer = setTimeout(publishMedia, 300); }
   }, 2000);
 
   if (window.top !== window.self) return;   // 아래는 바깥 페이지에서만
@@ -330,7 +339,7 @@
   setInterval(() => {
     if (!document.querySelector('video')) return;
     hookHls();
-    hlsList.forEach(h => { if (h.url) noteMedia(h.url, 'hls'); });   // hls.js가 연 재생 목록 (영상 받기용)
+    hlsList.forEach(h => { if (h.url) noteMedia(h.url, 'hls', !!(h.media && watched(h.media))); });   // hls.js가 연 재생 목록 (영상 받기용)
     const q = document.documentElement.dataset.kwQuality || 'auto';
     const want = q === 'auto' ? 0 : num(q);
     const all = new Set();
