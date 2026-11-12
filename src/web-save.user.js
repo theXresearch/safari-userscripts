@@ -1,11 +1,11 @@
 // ==UserScript==
 // @name         Web Save
 // @namespace    https://github.com/theXresearch/safari-userscripts
-// @version      2026.11.12.3
+// @version      2026.11.12.4
 // @author       theXresearch
 // @updateURL    https://raw.githubusercontent.com/theXresearch/safari-userscripts/main/src/web-save.meta.js
 // @downloadURL  https://raw.githubusercontent.com/theXresearch/safari-userscripts/main/src/web-save.user.js
-// @description  일반 사이트 영상 내려받기 (데이터 없이 나중에 보기): ⬇ 한 번 → 기본 화질(1080p)로 받아 영상 제목 그대로 자동 저장, 저장 후 임시 파일 자동 삭제 / 다른 화질 선택, M3U8(HLS)·MP4, 암호화(AES-128) 해독, MP4 변환, 이어받기, 차례 받기, 공간 확인, 임시 파일·받은 영상 모두 지우기, 받은 기록
+// @description  일반 사이트 영상 내려받기 (데이터 없이 나중에 보기): ⬇ 한 번 → 기본 화질(1080p)로 받아 영상 제목 그대로 🎬 영상보기(Safari 안 목록·재생) 또는 파일 앱에 저장, 저장 후 임시 파일 자동 삭제 / 🎵 소리만 받기, 다른 화질 선택, M3U8(HLS)·MP4, 암호화(AES-128) 해독, MP4 변환, 이어받기, 차례 받기, 공간 확인, 임시 파일·받은 영상 모두 지우기, 받은 기록
 // @match        *://*/*
 // @exclude      *://*.youtube.com/*
 // @run-at       document-end
@@ -24,6 +24,10 @@
   // 받은 조각은 이 사이트의 저장 공간(IndexedDB)에 차곡차곡 쌓음 → 메모리를 적게 쓰고, 중간에 끊겨도 이어받기
   // 다 받으면 조각을 한 파일로 묶어 '파일에 저장'(파일 앱 → 다운로드) 또는 '공유'(사진 앱에 저장 등)
   const ROOT = document.documentElement;
+  // 🎬 영상보기 페이지 (받은 영상 목록·재생). 이 페이지에서는 받기 기능을 쓰지 않음
+  const LIB = window.__kwLib || 'https://thexresearch.github.io/safari-userscripts/videos/';
+  const LIB_ORIGIN = new URL(LIB).origin;
+  if (location.href.startsWith(LIB)) return;
   const CONCURRENCY = 4;                 // 동시에 받는 조각 수
   const CHUNK = 4 << 20;                 // 일반 영상 파일은 4MB씩
   // MP4 변환기 (mux.js: mux-mp4 판은 muxjs.Transmuxer, 전체 판은 muxjs.mp4.Transmuxer)
@@ -230,6 +234,7 @@
     return t.trim();
   };
   const ext = j => (j.fmt === 'ts' ? '.ts' : j.audioOnly ? '.m4a' : '.mp4');
+  const mime = j => (j.fmt === 'ts' ? 'video/mp2t' : j.audioOnly ? 'audio/mp4' : 'video/mp4');
   const fileName = j => j.name + ext(j);
   const save = j => { if (j.removed) return Promise.resolve(); j.at = Date.now(); return DB.putJob(Object.assign({}, j)).catch(() => {}); };
 
@@ -248,14 +253,15 @@
     // 이어받기면 새 변환기를 이전까지의 시간에서 시작 (시간이 0으로 돌아가지 않게)
     const startSec = j.segs.slice(0, j.done).reduce((a, s) => a + s.d, 0);
     let tm = null, out = [];
+    // 'aud'(소리만)은 영상·소리를 따로 꺼내(remux: false) 소리 쪽만 씀
     const transmux = u8 => {
       if (!tm) {
-        tm = new (Muxer())({ remux: true, baseMediaDecodeTime: Math.round(startSec * 90000) });
+        tm = new (Muxer())({ remux: j.fmt !== 'aud', baseMediaDecodeTime: Math.round(startSec * 90000) });
         tm.on('data', s => out.push(s));
       }
       out = [];
       tm.push(u8); tm.flush();
-      return out;
+      return j.fmt === 'aud' ? out.filter(x => x.type === 'audio') : out;
     };
     if (j.map && !j.initDone) {
       const r = await retry(j, () => getBin(j, j.map.u, j.map.br));
@@ -267,9 +273,13 @@
         let data = ready.get(writeAt); ready.delete(writeAt);
         const s = j.segs[writeAt];
         data = await decrypt(j, s, data);
-        if (!j.fmt) j.fmt = data[0] === 0x47 ? (hasMux() ? 'tsmux' : 'ts') : 'mp4';   // 0x47 = TS 조각
+        if (!j.fmt) {
+          const ts = data[0] === 0x47;                                         // 0x47 = TS 조각
+          const aac = (data[0] === 0xFF && (data[1] & 0xF6) === 0xF0) || (data[0] === 0x49 && data[1] === 0x44 && data[2] === 0x33);   // 소리 조각(AAC·ID3)
+          j.fmt = j.audioOnly && (ts || aac) && hasMux() ? 'aud' : ts ? (hasMux() ? 'tsmux' : 'ts') : 'mp4';
+        }
         let blob;
-        if (j.fmt === 'tsmux') {
+        if (j.fmt === 'tsmux' || j.fmt === 'aud') {
           const segsOut = transmux(data);
           if (!j.initDone && segsOut.length) {
             await DB.putPart(j.id, -1, new Blob([setDuration(segsOut[0].initSegment, j.dur)]));
@@ -322,7 +332,8 @@
 
   // ================= 6-2. 설정·기록 (모든 사이트 공통, Userscripts 저장소) =================
   // SS: quality = 기본 화질(세로 픽셀, 0 = 가장 좋은 화질) · oneTap = ⬇ 한 번에 바로 받기 · autoSave = 다 받으면 저장 · autoClean = 저장 후 임시 파일 정리
-  const SS = { quality: 1080, oneTap: true, autoSave: true, autoClean: true };
+  // dest = 저장할 곳: 'library'(🎬 영상보기, Safari 안) | 'files'(파일 앱)
+  const SS = { quality: 1080, oneTap: true, autoSave: true, autoClean: true, dest: 'library' };
   const CLEAN_MS = window.__kwSaveCleanMs || 10 * 60000;          // 저장 후 임시 파일을 지우기까지 (Safari가 파일 앱으로 옮길 시간)
   const STALE_MS = 3 * 864e5;           // 3일 동안 손대지 않은 받다 만 작업은 자동 정리
   const SHORTCUT = '영상 모두 삭제';     // '받은 영상 모두 삭제'가 실행할 단축어 이름
@@ -389,15 +400,59 @@
     refresh();
     startNext();
   };
-  // 다 받은 영상: 화면이 보일 때 자동으로 저장 → 10분 뒤 임시 파일 자동 삭제
+  // 다 받은 영상
+  //  · 파일 앱: 화면이 보일 때 자동으로 저장 → 10분 뒤 임시 파일 자동 삭제
+  //  · 영상보기: 페이지를 여는 데 손가락 한 번이 필요(iPhone 규칙) → 아래 '🎬 영상보기에 넣기' 띠를 띄움. 넣으면 임시 파일 바로 삭제
   const saving = new Set();
+  let pendingN = 0;                    // 영상보기에 넣기를 기다리는 완료 영상 수
   const afterDone = async () => {
     const js = await DB.jobs().catch(() => []);
     for (const j of js) {
       if (j.state !== 'done' || saving.has(j.id)) continue;
-      if (!j.savedAt && SS.autoSave && visible()) { saving.add(j.id); await saveToFiles(j, true).catch(() => {}); saving.delete(j.id); }
+      if (!j.savedAt && SS.dest === 'files' && SS.autoSave && visible()) { saving.add(j.id); await saveToFiles(j, true).catch(() => {}); saving.delete(j.id); }
       else if (j.savedAt && SS.autoClean && Date.now() - j.savedAt > CLEAN_MS) await remove(j);
     }
+    const pend = js.filter(j => j.state === 'done' && !j.savedAt && SS.dest === 'library');
+    pendingN = pend.length;
+    libBar(pend);
+  };
+  // 🎬 영상보기로 보내기: 영상보기 페이지를 새 탭으로 열고, 그 페이지가 준비되면 영상 파일을 하나씩 건넴 → 받았다고 하면 임시 파일 삭제
+  const sendToLibrary = async list => {
+    list = list || (await DB.jobs().catch(() => [])).filter(j => j.state === 'done' && !j.savedAt);
+    if (!list.length) return window.open(LIB, '_blank');
+    const w = window.open(LIB, '_blank');
+    if (!w) return toast('새 탭을 열 수 없음 — 다시 눌러 주세요');
+    let sent = false;
+    const onMsg = async e => {
+      if (e.source !== w || e.origin !== LIB_ORIGIN || !e.data) return;
+      if (e.data.kwLib === 'ready' && !sent) {
+        sent = true;
+        for (const j of list) {
+          const blob = await prepare(j);
+          w.postMessage({ kwLib: 'put', blob, item: { id: j.id, name: j.name, dur: j.dur || 0, h: j.h || 0, audio: !!j.audioOnly, ts: j.fmt === 'ts', site: location.hostname } }, LIB_ORIGIN);
+        }
+      } else if (e.data.kwLib === 'ok') {
+        const j = list.find(x => x.id === e.data.id);
+        if (j) { j.savedAt = Date.now(); await remove(j); }      // 영상보기에 들어갔으니 이 사이트의 임시 파일은 바로 지움
+        if (list.every(x => x.savedAt)) window.removeEventListener('message', onMsg);
+      } else if (e.data.kwLib === 'fail') toast('영상보기에 넣지 못함: ' + (e.data.err || ''));
+    };
+    window.addEventListener('message', onMsg);
+  };
+  // 화면 아래 띠: '✓ 받기 완료 n개 — 🎬 영상보기에 넣기'
+  const libBar = pend => {
+    let bar = document.getElementById('kw-savelib');
+    if (!pend.length || !document.body) { if (bar) bar.remove(); return; }
+    if (!bar) {
+      bar = mk('div', 'position:fixed;left:10px;right:10px;bottom:calc(14px + env(safe-area-inset-bottom));z-index:2147483647;display:flex;align-items:center;gap:10px;' +
+        'background:rgba(28,28,30,.96);color:#fff;padding:10px 12px;border-radius:14px;font:14px -apple-system,sans-serif;box-shadow:0 4px 16px rgba(0,0,0,.5)');
+      bar.id = 'kw-savelib';
+      const t = mk('div', 'flex:1');
+      const go = btn('🎬 영상보기에 넣기', () => { bar.remove(); sendToLibrary(); }, '#0a84ff');
+      bar.append(t, go);
+      document.body.appendChild(bar);
+    }
+    bar.firstChild.textContent = `✓ 받기 완료 ${pend.length}개`;
   };
   // 정리: 오래 방치된 작업, '임시 파일 모두 지우기'를 누른 뒤 남은 이 사이트 작업
   const tidyUp = async () => {
@@ -469,6 +524,24 @@
     try { const e = await navigator.storage.estimate(); const free = (e.quota || 0) - (e.usage || 0); if (free && free < bytes * 1.05) { toast(`저장 공간 부족: 필요 약 ${MB(bytes)}, 남은 공간 ${MB(free)}`); return false; } } catch (e) {}
     return true;
   };
+  // 🎵 소리만 받기: 소리가 따로 있으면 그것만, 아니면 가장 낮은 화질을 받아 소리만 꺼냄 (데이터 절약)
+  const beginAudio = async (c, p) => {
+    if (c.t === 'file') return toast('이 영상 파일은 소리만 따로 받을 수 없음 — 영상으로 받기');
+    const src = c.u + '#audio';
+    const old = (await DB.jobs().catch(() => [])).find(j => j.src === src);
+    if (old) return toast(old.state === 'done' ? '이미 받은 소리입니다' : '이미 받는 중입니다');
+    let target = c;
+    if (p && p.master) {
+      const withAudio = p.variants.find(v => v.audioUrl);
+      target = withAudio ? { u: withAudio.audioUrl, t: 'hls', main: c.main } : { u: p.variants[p.variants.length - 1].u, t: 'hls', main: c.main };
+    }
+    const j = await newJob(target);
+    if (j.map && !(p && p.master && p.variants.some(v => v.audioUrl))) throw new Error('이 영상은 소리만 따로 받을 수 없는 형식 — 영상으로 받기');
+    if (!hasMux() && !j.map) throw new Error('변환기를 불러오지 못해 소리만 받을 수 없음');
+    Object.assign(j, { src, audioOnly: true, h: 0 });
+    start(j);
+    toast('🎵 소리만 받기 시작');
+  };
   // 받기 시작 (같은 영상을 다른 화질로 받던 중이면 그것은 취소하고 새로 시작)
   const begin = async (c, p, v) => {
     if (!(await roomFor(estimate(p, v)))) return;
@@ -483,9 +556,9 @@
     if (v && v.audioUrl) {
       toast('이 영상은 소리가 따로 있어 영상·소리 두 파일로 받습니다');
       const a = await newJob({ u: v.audioUrl, t: 'hls' });
-      Object.assign(a, { name: j.name + ' (소리)', audioOnly: true, src: c.u + '#audio' });
+      Object.assign(a, { name: j.name + ' (소리)', audioOnly: true, src: c.u + '#audio-pair' });
       start(a);
-    } else toast(`${v && v.h ? v.h + 'p로 ' : ''}받기 시작 — 다 받으면 자동으로 저장됩니다`);
+    } else toast(`${v && v.h ? v.h + 'p로 ' : ''}받기 시작 — 다 받으면 ${SS.dest === 'files' ? '파일 앱에 자동 저장' : '🎬 영상보기에 넣을 수 있습니다'}`);
   };
 
   // ================= 7. 이 페이지의 영상 찾기 =================
@@ -561,15 +634,18 @@
     return ok.sort((a, b) => ((b.p && b.p.master ? 2 : b.p ? 1 : 0) - (a.p && a.p.master ? 2 : a.p ? 1 : 0)) ||
       ((len(b) >= 30) - (len(a) >= 30)) || (len(b) - len(a)))[0];
   };
+  let picking = false;                 // ⬇를 누르고 영상을 고르는 중 (버튼에 '⬇ …')
   const oneTap = async () => {
     const js = await DB.jobs().catch(() => []);
     if (!SS.oneTap || js.some(j => j.page === location.href && /run|queue|pause|error/.test(j.state))) return openPanel();
     const b = document.getElementById('kw-save');
+    picking = true;
     if (b) b.textContent = '⬇ …';
     const best = bestOf(await listing());
-    if (!best) { toast('받을 영상을 찾지 못함 → 영상을 먼저 재생한 뒤 다시 누르세요'); return openPanel(); }
+    if (!best) { picking = false; toast('받을 영상을 찾지 못함 → 영상을 먼저 재생한 뒤 다시 누르세요'); return openPanel(); }
     try { await begin(best.c, best.p, best.p && best.p.master ? pickVariant(best.p.variants) : null); }
     catch (e) { toast('받을 수 없음: ' + e.message); openPanel(); }
+    picking = false;
     refresh();
   };
 
@@ -597,7 +673,7 @@
   // 저장: 조각을 한 파일로 묶어 Safari 다운로드로 넘김 → 설정한 다운로드 폴더(기본: 파일 앱 → 다운로드)
   const blobs = new Map();
   const prepare = j => {
-    if (!blobs.has(j.id)) blobs.set(j.id, DB.parts(j.id).then(ps => new Blob(ps, { type: j.fmt === 'ts' ? 'video/mp2t' : 'video/mp4' })));
+    if (!blobs.has(j.id)) blobs.set(j.id, DB.parts(j.id).then(ps => new Blob(ps, { type: mime(j) })));
     return blobs.get(j.id);
   };
   const saveToFiles = async (j, auto) => {
@@ -628,7 +704,7 @@
     const left = speed && j.kind === 'hls' && j.done ? (j.total - j.done) * (j.bytes / j.done) / speed : 0;
     if (j.state === 'done') {
       const mins = j.savedAt && SS.autoClean ? Math.max(1, Math.ceil((CLEAN_MS - (Date.now() - j.savedAt)) / 60000)) : 0;
-      return `${j.savedAt ? '✓ 저장함' : '완료'} · ${MB(j.bytes)}${j.dur ? ' · ' + fmtT(j.dur) : ''}${mins ? ` · 임시 파일 ${mins}분 뒤 자동 삭제` : ''}`;
+      return `${j.savedAt ? '✓ 저장함' : SS.dest === 'library' ? '완료 — 🎬 영상보기에 넣으세요' : '완료'} · ${MB(j.bytes)}${j.dur ? ' · ' + fmtT(j.dur) : ''}${mins ? ` · 임시 파일 ${mins}분 뒤 자동 삭제` : ''}`;
     }
     if (j.state === 'error') return '⚠ ' + j.err;
     if (j.state === 'queue') return '차례 기다리는 중';
@@ -643,7 +719,8 @@
     const acts = mk('div', 'display:flex;gap:6px;flex-wrap:wrap;margin-top:4px');
     if (j.state === 'done') {
       prepare(j);
-      acts.append(btn(j.savedAt ? '다시 저장' : '저장', () => saveToFiles(j), '#0a84ff'), btn('공유 (사진 앱 등)', () => share(j)),
+      acts.append(btn('🎬 영상보기에 넣기', () => sendToLibrary([j]), SS.dest === 'library' ? '#0a84ff' : ''),
+        btn(j.savedAt ? '💾 다시 저장' : '💾 파일 앱에 저장', () => saveToFiles(j), SS.dest === 'files' ? '#0a84ff' : ''), btn('공유', () => share(j)),
         btn('임시 파일 지우기', () => remove(j), '#5a1f1f'));
     } else {
       if (j.state !== 'queue') acts.append(j.state === 'run' ? btn('멈춤', () => pause(j)) : btn(j.state === 'error' ? '다시 시도' : '계속', () => start(j), '#0a84ff'));
@@ -676,6 +753,14 @@
       });
     } else if (p.live) kind = '실시간 방송 — 받을 수 없음';
     else { kind = `영상 ${fmtT(p.dur)} · 조각 ${p.segs.length}개${p.segs[0] && p.segs[0].k ? ' · 암호화' : ''}`; acts.append(go(null, '받기')); }
+    if (p && !p.error && !p.live) {
+      const has = jobs.find(j => j.src === c.u + '#audio');
+      acts.append(btn((has ? (has.state === 'done' ? '✓ ' : '⬇ ') : '') + '🎵 소리만', async b => {
+        b.disabled = true; b.textContent = '준비 중…';
+        try { await beginAudio(c, p); } catch (e) { toast('받을 수 없음: ' + e.message); }
+        refresh(true);
+      }, has ? '#1f4f2a' : '#5e3a8c'));
+    }
     box.append(mk('div', 'font-weight:600', kind), mk('div', 'color:#888;font-size:11px;word-break:break-all;margin-top:2px', host + ' · ' + c.u.split('?')[0].split('/').slice(-1)[0]), acts);
     return box;
   };
@@ -696,6 +781,16 @@
     });
     return mk('div', 'padding:8px 0;border-top:1px solid #333', mk('div', '', '기본 화질'),
       mk('div', 'color:#999;font-size:12px;margin-top:2px', '이 화질 이하에서 가장 좋은 것으로 받음 (없으면 가장 낮은 화질)'), row);
+  };
+  const destRow = () => {
+    const row = mk('div', 'display:flex;gap:6px;flex-wrap:wrap;margin-top:6px');
+    [['library', '🎬 영상보기 (Safari 안)'], ['files', '💾 파일 앱']].forEach(([d, t]) => {
+      row.appendChild(btn((SS.dest === d ? '✓ ' : '') + t, () => { SS.dest = d; saveSet(); refresh(true); }, SS.dest === d ? '#0a84ff' : ''));
+    });
+    return mk('div', 'padding:8px 0;border-top:1px solid #333', mk('div', '', '저장할 곳'),
+      mk('div', 'color:#999;font-size:12px;margin-top:2px', SS.dest === 'library'
+        ? '영상보기: Safari 안 목록에서 바로 보기·이어 보기·길게 눌러 삭제/공유. Safari가 오래 안 연 사이트 데이터를 지울 수 있어, 오래 둘 영상은 영상보기에서 "파일 앱에 저장"'
+        : '파일 앱: 설정한 다운로드 폴더에 영구 보관 (아래 📁 저장 폴더)'), row);
   };
   const guide = (title, lines) => {
     const body = mk('div', NOTE + ';display:none;padding:6px 0 0 4px', ...lines.flatMap(l => [l, mk('br')]));
@@ -747,6 +842,7 @@
         btn('지금 지우기', async () => { for (const j of saved) await remove(j); })) : null,
       fold('settings', '⚙ 받기 설정 · 정리', [
       H('설정 (모든 사이트)'),
+      destRow(),
       qualityRow(),
       toggle('oneTap', '⬇ 한 번 누르면 바로 받기', '끄면 누를 때마다 화질을 고르는 화면이 열림'),
       toggle('autoSave', '다 받으면 자동 저장', 'Safari가 "다운로드할까요?"를 물으면 다운로드'),
@@ -783,7 +879,8 @@
     if (panel && panel.isConnected) return;
     const sheet = mk('div', 'position:absolute;left:0;right:0;bottom:0;max-height:85vh;overflow:auto;background:#1c1c1e;color:#fff;' +
       'border-radius:16px 16px 0 0;padding:14px 16px calc(16px + env(safe-area-inset-bottom));font:14px -apple-system,sans-serif;text-align:left;',
-      mk('div', 'display:flex;align-items:center', mk('div', 'flex:1;font:700 18px -apple-system,sans-serif', '⬇ 영상 받기'), btn('닫기', () => panel.remove())));
+      mk('div', 'display:flex;align-items:center;gap:6px', mk('div', 'flex:1;font:700 18px -apple-system,sans-serif', '⬇ 영상 받기'),
+        btn('🎬 영상보기', () => window.open(LIB, '_blank')), btn('닫기', () => panel.remove())));
     const body = mk('div', '');
     body.dataset.body = '1';
     sheet.appendChild(body);
@@ -803,7 +900,7 @@
     if (!document.body) return;
     let b = document.getElementById('kw-save');
     const busy = [...running.values()].map(r => r.j);
-    const show = busy.length || document.querySelector('video') || candidates().length;
+    const show = busy.length || pendingN || document.querySelector('video') || candidates().length;
     if (!show) { if (b) b.remove(); return; }
     if (!b) {
       b = mk('button', 'position:fixed;right:6px;bottom:calc(120px + env(safe-area-inset-bottom));z-index:2147483647;' +
@@ -812,12 +909,12 @@
       let pressT = 0, long = false;
       b.addEventListener('touchstart', () => { long = false; pressT = setTimeout(() => { long = true; openPanel(); }, 550); }, { passive: true });
       b.addEventListener('touchend', () => clearTimeout(pressT), { passive: true });
-      b.addEventListener('click', e => { e.stopPropagation(); if (long) { long = false; return; } if (running.size) openPanel(); else oneTap(); });
+      b.addEventListener('click', e => { e.stopPropagation(); if (long) { long = false; return; } if (running.size) openPanel(); else if (pendingN) sendToLibrary(); else oneTap(); });
       document.body.appendChild(b);
     }
-    if (b.textContent === '⬇ …') return;
+    if (picking) return;
     const j = busy[0];
-    const t = j ? `⬇ ${Math.floor(progress(j) * 100)}%` : '⬇';
+    const t = j ? `⬇ ${Math.floor(progress(j) * 100)}%` : pendingN ? `🎬 ${pendingN}` : '⬇';
     if (b.textContent !== t) b.textContent = t;
   };
   // 1초마다: 버튼·화면 갱신, 다 받은 영상 자동 저장·정리 (10초마다), 작동 상태 (web-main ⚙): <html data-kw-save>

@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="dark light">
+<title>영상보기</title>
+<style>
+  :root { --bg: #000; --card: #1c1c1e; --line: #2c2c2e; --text: #fff; --sub: #98989f; --blue: #0a84ff; --red: #ff453a; --green: #30d158; }
+  @media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) { --bg: #f2f2f7; --card: #fff; --line: #e5e5ea; --text: #000; --sub: #6c6c70; } }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; background: var(--bg); color: var(--text); font: 15px -apple-system, system-ui, sans-serif; }
+  body { padding: env(safe-area-inset-top) 16px calc(24px + env(safe-area-inset-bottom)); }
+  header { display: flex; align-items: center; gap: 10px; padding: 14px 0 10px; position: sticky; top: 0; background: var(--bg); z-index: 2; }
+  header h1 { flex: 1; margin: 0; font-size: 26px; }
+  button { font: 600 15px -apple-system, system-ui, sans-serif; color: var(--text); background: var(--line); border: 0; border-radius: 10px; padding: 8px 12px; }
+  button.blue { background: var(--blue); color: #fff; } button.red { color: var(--red); }
+  #sum, .sub { color: var(--sub); font-size: 13px; }
+  #recv { background: var(--card); border-radius: 12px; padding: 12px; margin-bottom: 10px; }
+  .row { display: flex; gap: 12px; align-items: center; background: var(--card); border-radius: 12px; padding: 8px; margin-bottom: 8px;
+         -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; position: relative; overflow: hidden; }
+  .row.pressed { opacity: .6; }
+  .thumb { width: 112px; height: 63px; border-radius: 8px; background: #333 center/cover; flex: none; display: grid; place-items: center; font-size: 26px; position: relative; }
+  .thumb .len { position: absolute; right: 4px; bottom: 3px; background: rgba(0,0,0,.75); color: #fff; font-size: 11px; padding: 1px 4px; border-radius: 4px; }
+  .info { flex: 1; min-width: 0; }
+  .name { font-weight: 600; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; word-break: break-all; }
+  .seen { position: absolute; left: 0; bottom: 0; height: 3px; background: var(--red); }
+  .more { background: none; color: var(--sub); font-size: 20px; padding: 6px 8px; }
+  #empty { color: var(--sub); text-align: center; padding: 60px 10px; line-height: 1.6; }
+  #player { position: fixed; inset: 0; background: #000; z-index: 10; display: flex; flex-direction: column; }
+  #player video { flex: 1; width: 100%; min-height: 0; background: #000; }
+  #player .bar { display: flex; align-items: center; gap: 10px; padding: calc(8px + env(safe-area-inset-top)) 12px 8px; color: #fff; }
+  #player .bar div { flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  #sheetWrap { position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 20; display: flex; align-items: flex-end; }
+  #sheet { width: 100%; background: var(--card); border-radius: 16px 16px 0 0; padding: 14px 16px calc(16px + env(safe-area-inset-bottom)); max-height: 85vh; overflow: auto; }
+  #sheet h2 { font-size: 17px; margin: 0 0 4px; word-break: break-all; }
+  #sheet .item { display: block; width: 100%; text-align: left; background: none; border-top: 1px solid var(--line); border-radius: 0; padding: 14px 4px; font-weight: 500; }
+  #sheet .item.red { color: var(--red); }
+  #sheet label { display: flex; align-items: center; gap: 8px; padding: 10px 4px; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<header><h1>🎬 영상보기</h1><button id="setBtn" aria-label="설정">⚙</button></header>
+<div id="sum"></div>
+<div id="recv" hidden></div>
+<main id="list"></main>
+<div id="empty" hidden>저장한 영상이 없습니다.<br>영상 사이트에서 ⬇를 누르면 받은 영상이 여기에 모입니다.<br><span class="sub">인터넷 없이도 이 페이지에서 볼 수 있습니다.</span></div>
+<div id="player" hidden><div class="bar"><div id="ptitle"></div><button id="pclose">닫기</button></div><video id="video" controls playsinline></video></div>
+<div id="sheetWrap" hidden><div id="sheet"></div></div>
+<script>
+'use strict';
+// 영상보기: web-save(⬇ 영상 받기)가 받은 영상을 이 페이지의 저장 공간(IndexedDB)에 모아 두고 인터넷 없이 봄.
+// 받기는 영상 사이트 탭에서 하고, 다 받으면 이 페이지를 열어 영상 파일을 건네받음(postMessage).
+const $ = id => document.getElementById(id);
+const MB = b => (b >= 1 << 30 ? (b / (1 << 30)).toFixed(2) + 'GB' : (b / (1 << 20)).toFixed(b < 10 << 20 ? 1 : 0) + 'MB');
+const fmtT = x => { x = Math.max(0, Math.round(x || 0)); const h = Math.floor(x / 3600), m = Math.floor(x / 60) % 60, s = String(x % 60).padStart(2, '0');
+  return h ? `${h}:${String(m).padStart(2, '0')}:${s}` : `${m}:${s}`; };
+const ls = { get: (k, d) => { try { const v = localStorage.getItem(k); return v === null ? d : v; } catch (e) { return d; } },
+             set: (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} } };
+
+// ---------- 저장 공간 ----------
+// meta: 영상 정보(이름·길이·크기·본 위치·썸네일) / files: 영상 파일을 8MB씩 나눈 조각 [영상ID, 순번]
+// (건네받은 파일은 영상 사이트 쪽 저장 공간을 가리키고 있어, 그쪽이 지워져도 남도록 조각마다 새로 복사해 저장)
+const DB = (() => {
+  let p = null;
+  const open = () => p || (p = new Promise((res, rej) => {
+    const r = indexedDB.open('kw-videos', 1);
+    r.onupgradeneeded = () => { r.result.createObjectStore('meta', { keyPath: 'id' }); r.result.createObjectStore('files'); };
+    r.onsuccess = () => res(r.result); r.onerror = () => { p = null; rej(r.error); };
+  }));
+  const tx = (stores, mode, fn) => open().then(d => new Promise((res, rej) => {
+    const t = d.transaction(stores, mode); let out;
+    const r = fn(t); if (r) r.onsuccess = () => { out = r.result; };
+    t.oncomplete = () => res(out); t.onerror = t.onabort = () => rej(t.error || new Error('저장 실패'));
+  }));
+  const span = id => IDBKeyRange.bound([id, 0], [id, Infinity]);
+  const CH = 8 << 20;
+  return {
+    all: () => tx('meta', 'readonly', t => t.objectStore('meta').getAll()),
+    put: m => tx('meta', 'readwrite', t => t.objectStore('meta').put(m)),
+    file: id => tx('files', 'readonly', t => t.objectStore('files').getAll(span(id))).then(ps => (ps && ps.length ? new Blob(ps) : null)),
+    add: async (m, blob, onProgress) => {
+      for (let i = 0, at = 0; at < blob.size; i++, at += CH) {
+        const part = new Blob([await blob.slice(at, at + CH).arrayBuffer()]);
+        await tx('files', 'readwrite', t => t.objectStore('files').put(part, [m.id, i]));
+        if (onProgress) onProgress(Math.min(1, (at + CH) / blob.size));
+      }
+      return tx('meta', 'readwrite', t => t.objectStore('meta').put(m));
+    },
+    del: id => tx(['meta', 'files'], 'readwrite', t => { t.objectStore('files').delete(span(id)); return t.objectStore('meta').delete(id); })
+  };
+})();
+const ext = m => (m.audio ? '.m4a' : m.ts ? '.ts' : '.mp4');
+const mime = m => (m.audio ? 'audio/mp4' : m.ts ? 'video/mp2t' : 'video/mp4');
+const fileOf = async m => { const b = await DB.file(m.id); if (!b) throw new Error('파일이 없음'); return new File([b], m.name + ext(m), { type: mime(m) }); };
+
+// ---------- 목록 ----------
+let items = [];
+async function render() {
+  items = (await DB.all().catch(() => [])).sort((a, b) => b.at - a.at);
+  const total = items.reduce((a, m) => a + (m.size || 0), 0);
+  $('sum').textContent = items.length ? `${items.length}개 · ${MB(total)}` : '';
+  $('empty').hidden = !!items.length;
+  $('list').replaceChildren(...items.map(row));
+}
+function row(m) {
+  const el = document.createElement('div');
+  el.className = 'row';
+  const th = document.createElement('div');
+  th.className = 'thumb';
+  if (m.thumb) th.style.backgroundImage = `url("${m.thumb}")`; else th.textContent = m.audio ? '🎵' : '🎬';
+  if (m.dur) { const l = document.createElement('span'); l.className = 'len'; l.textContent = fmtT(m.dur); th.appendChild(l); }
+  const info = document.createElement('div');
+  info.className = 'info';
+  const nm = document.createElement('div'); nm.className = 'name'; nm.textContent = m.name;
+  const sub = document.createElement('div'); sub.className = 'sub';
+  sub.textContent = [m.h ? m.h + 'p' : m.audio ? '소리만' : '', MB(m.size || 0), new Date(m.at).toLocaleDateString(), m.pos > 5 && m.dur ? `${fmtT(m.pos)}까지 봄` : ''].filter(Boolean).join(' · ');
+  info.append(nm, sub);
+  const more = document.createElement('button'); more.className = 'more'; more.textContent = '⋯'; more.setAttribute('aria-label', '메뉴');
+  more.addEventListener('click', e => { e.stopPropagation(); menu(m); });
+  el.append(th, info, more);
+  if (m.pos > 5 && m.dur) { const s = document.createElement('div'); s.className = 'seen'; s.style.width = Math.min(100, m.pos / m.dur * 100) + '%'; el.appendChild(s); }
+  // 누름 = 재생 / 길게 누름 = 메뉴
+  let timer = 0, long = false, x0 = 0, y0 = 0;
+  el.addEventListener('touchstart', e => { long = false; x0 = e.touches[0].clientX; y0 = e.touches[0].clientY; el.classList.add('pressed');
+    timer = setTimeout(() => { long = true; el.classList.remove('pressed'); if (navigator.vibrate) navigator.vibrate(10); menu(m); }, 500); }, { passive: true });
+  el.addEventListener('touchmove', e => { if (Math.hypot(e.touches[0].clientX - x0, e.touches[0].clientY - y0) > 10) { clearTimeout(timer); el.classList.remove('pressed'); } }, { passive: true });
+  el.addEventListener('touchend', () => { clearTimeout(timer); el.classList.remove('pressed'); }, { passive: true });
+  el.addEventListener('contextmenu', e => { e.preventDefault(); if (!long) menu(m); });
+  el.addEventListener('click', () => { if (long) { long = false; return; } open(m); });
+  return el;
+}
+
+// ---------- 시트 (메뉴·물음) ----------
+function sheet(title, sub, buttons) {
+  const s = $('sheet');
+  s.replaceChildren();
+  if (title) { const h = document.createElement('h2'); h.textContent = title; s.appendChild(h); }
+  if (sub) { const p = document.createElement('div'); p.className = 'sub'; p.style.marginBottom = '8px'; p.textContent = sub; s.appendChild(p); }
+  buttons.forEach(b => {
+    if (b instanceof Node) return s.appendChild(b);
+    const x = document.createElement('button'); x.className = 'item' + (b.red ? ' red' : ''); x.textContent = b.t;
+    x.addEventListener('click', () => { if (!b.keep) closeSheet(); b.fn(x); });
+    s.appendChild(x);
+  });
+  const c = document.createElement('button'); c.className = 'item'; c.textContent = '취소'; c.style.textAlign = 'center'; c.addEventListener('click', closeSheet);
+  s.appendChild(c);
+  $('sheetWrap').hidden = false;
+}
+const closeSheet = () => { $('sheetWrap').hidden = true; };
+$('sheetWrap').addEventListener('click', e => { if (e.target.id === 'sheetWrap') closeSheet(); });
+
+// ---------- 열기: 처음 한 번 'Safari에서 볼지 / 다른 앱으로 볼지' 묻고 기억 ----------
+function open(m) {
+  const mode = ls.get('kwPlay', '');
+  if (mode === 'safari') return play(m);
+  if (mode === 'app') return openApp(m);
+  const keep = document.createElement('label');
+  keep.innerHTML = '<input type="checkbox" checked> 다음부터 묻지 않기 (⚙에서 바꿀 수 있음)';
+  const cb = keep.querySelector('input');
+  fileCache(m);
+  sheet('어떻게 볼까요?', m.name, [
+    { t: '▶ Safari에서 바로 보기', fn: () => { if (cb.checked) ls.set('kwPlay', 'safari'); play(m); } },
+    { t: '📲 다른 앱으로 열기 (VLC·Infuse 등)', fn: () => { if (cb.checked) ls.set('kwPlay', 'app'); openApp(m); } },
+    keep
+  ]);
+}
+// 공유(다른 앱으로 열기)는 누른 직후에만 허락되므로 파일을 미리 꺼내 둠
+const cache = new Map();
+const fileCache = m => { if (!cache.has(m.id)) cache.set(m.id, fileOf(m)); return cache.get(m.id); };
+async function openApp(m, again) {
+  let f;
+  try { f = await fileCache(m); } catch (e) { return alert(e.message); }
+  if (!navigator.canShare || !navigator.canShare({ files: [f] })) return play(m);
+  try { await navigator.share({ files: [f] }); }
+  catch (e) {
+    if (e.name === 'NotAllowedError' && !again) sheet('앱 고르기', '아래를 누르면 앱 목록이 열립니다 (VLC → "Copy to VLC" 등)', [{ t: '📲 앱 목록 열기', fn: () => openApp(m, true) }]);
+  }
+}
+
+// ---------- Safari 플레이어 (본 곳부터 이어 보기) ----------
+let playing = null, url = '', lastSave = 0;
+async function play(m) {
+  let b;
+  try { b = await DB.file(m.id); } catch (e) { b = null; }
+  if (!b) return alert('파일이 없습니다');
+  const v = $('video');
+  if (url) URL.revokeObjectURL(url);
+  url = URL.createObjectURL(new Blob([b], { type: mime(m) }));
+  playing = m;
+  $('ptitle').textContent = m.name;
+  $('player').hidden = false;
+  v.src = url;
+  v.addEventListener('loadedmetadata', () => {
+    if (!m.dur && isFinite(v.duration)) { m.dur = v.duration; DB.put(m); }
+    if (m.pos > 5 && m.dur && m.pos < m.dur - 10) v.currentTime = m.pos;
+  }, { once: true });
+  v.play().catch(() => {});
+}
+const savePos = () => { if (playing) { const v = $('video'); playing.pos = v.ended ? 0 : v.currentTime; DB.put(playing).catch(() => {}); } };
+$('video').addEventListener('timeupdate', () => { if (Date.now() - lastSave > 5000) { lastSave = Date.now(); savePos(); } });
+$('video').addEventListener('pause', savePos);
+$('video').addEventListener('ended', savePos);
+$('pclose').addEventListener('click', () => { const v = $('video'); v.pause(); savePos(); v.removeAttribute('src'); v.load(); $('player').hidden = true; playing = null; render(); });
+
+// ---------- 길게 누름 메뉴 ----------
+function menu(m) {
+  fileCache(m);
+  sheet(m.name, [m.dur ? fmtT(m.dur) : '', MB(m.size || 0), m.site || ''].filter(Boolean).join(' · '), [
+    { t: '▶ Safari에서 보기', fn: () => play(m) },
+    { t: '📲 다른 앱으로 열기', fn: () => openApp(m) },
+    { t: '↗ 공유', fn: () => openApp(m) },
+    { t: '💾 파일 앱에 저장 (오래 보관)', fn: () => saveToFiles(m) },
+    { t: '✏️ 이름 바꾸기', fn: () => { const n = prompt('새 이름', m.name); if (n && n.trim()) { m.name = n.trim().replace(/[\\/:*?"<>|]/g, ' '); cache.delete(m.id); DB.put(m).then(render); } } },
+    { t: '🗑 삭제 (완전히 지움)', red: true, keep: true, fn: x => {
+      if (x.dataset.sure) { closeSheet(); DB.del(m.id).then(() => { cache.delete(m.id); render(); }); }
+      else { x.dataset.sure = 1; x.textContent = '🗑 한 번 더 누르면 완전히 삭제'; }
+    } }
+  ]);
+}
+async function saveToFiles(m) {
+  const f = await fileOf(m);
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(f); a.download = f.name;
+  document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 600000);
+}
+
+// ---------- 설정 ----------
+$('setBtn').addEventListener('click', async () => {
+  const mode = ls.get('kwPlay', '');
+  let st = '';
+  try { const e = await navigator.storage.estimate(); st = `사용 ${MB(e.usage || 0)} · 남은 공간 ${MB(Math.max(0, (e.quota || 0) - (e.usage || 0)))}`; } catch (e) {}
+  let kept = false; try { kept = await navigator.storage.persisted(); } catch (e) {}
+  const mark = v => (mode === v ? '✓ ' : '');
+  sheet('설정', st, [
+    { t: mark('safari') + '누르면: Safari에서 보기', fn: () => ls.set('kwPlay', 'safari') },
+    { t: mark('app') + '누르면: 다른 앱으로 열기', fn: () => ls.set('kwPlay', 'app') },
+    { t: mark('') + '누르면: 매번 묻기', fn: () => ls.set('kwPlay', '') },
+    { t: '🗑 영상 모두 삭제 (완전히 지움)', red: true, keep: true, fn: x => {
+      if (x.dataset.sure) { closeSheet(); Promise.all(items.map(m => DB.del(m.id))).then(() => { cache.clear(); render(); }); }
+      else { x.dataset.sure = 1; x.textContent = `🗑 한 번 더 누르면 ${items.length}개 모두 삭제`; }
+    } },
+    (() => { const d = document.createElement('div'); d.className = 'sub'; d.style.padding = '10px 4px'; d.style.lineHeight = '1.5';
+      d.textContent = (kept ? '보관 상태: 유지 요청됨. ' : '') + 'Safari는 오랫동안 열지 않은 사이트의 저장 공간을 지울 수 있습니다. 오래 보관할 영상은 길게 눌러 "파일 앱에 저장"을 쓰세요. 이 페이지를 즐겨찾기에 두면 인터넷 없이도 열립니다.';
+      return d; })()
+  ]);
+});
+
+// ---------- 받기: 영상 사이트 탭(web-save)이 이 페이지를 열고 영상 파일을 건넴 ----------
+let incoming = 0, pct = 0;
+const showRecv = () => { $('recv').hidden = !incoming; $('recv').textContent = `받는 중… ${incoming}개 · ${Math.floor(pct * 100)}%`; };
+window.addEventListener('message', async e => {
+  const d = e.data;
+  if (!d || d.kwLib !== 'put' || !(d.blob instanceof Blob) || !d.item || e.source !== window.opener) return;
+  incoming++; showRecv();
+  const it = d.item;
+  const m = { id: String(it.id || Date.now()), name: String(it.name || '영상').slice(0, 200), size: d.blob.size, dur: +it.dur || 0, h: +it.h || 0,
+              audio: !!it.audio, ts: !!it.ts, site: String(it.site || ''), at: Date.now(), pos: 0 };
+  try {
+    await DB.add(m, d.blob, x => { pct = x; showRecv(); });
+    e.source.postMessage({ kwLib: 'ok', id: it.id }, e.origin);
+    await render();
+    makeThumb(m);
+  } catch (err) {
+    e.source.postMessage({ kwLib: 'fail', id: it.id, err: err.message }, e.origin);
+  }
+  incoming--; showRecv();
+});
+// 썸네일: 영상의 10% 지점 한 장면
+function makeThumb(m) {
+  if (m.audio) return;
+  DB.file(m.id).then(b => {
+    if (!b) return;
+    const v = document.createElement('video'), u = URL.createObjectURL(new Blob([b], { type: mime(m) }));
+    v.muted = true; v.playsInline = true; v.preload = 'auto'; v.src = u;
+    const done = () => { URL.revokeObjectURL(u); v.removeAttribute('src'); v.load(); };
+    v.addEventListener('loadedmetadata', () => { if (!m.dur && isFinite(v.duration)) m.dur = v.duration; v.currentTime = Math.min((m.dur || 10) * 0.1, 60); }, { once: true });
+    v.addEventListener('seeked', () => {
+      try {
+        const c = document.createElement('canvas'); c.width = 224; c.height = 126;
+        c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
+        m.thumb = c.toDataURL('image/jpeg', 0.6);
+      } catch (e) {}
+      done(); DB.put(m).then(render);
+    }, { once: true });
+    v.addEventListener('error', done, { once: true });
+  });
+}
+
+// 시작
+try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) {}
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});   // 인터넷 없이도 열리게
+render();
+if (window.opener) try { window.opener.postMessage({ kwLib: 'ready' }, '*'); } catch (e) {}
+</script>
+</body>
+</html>

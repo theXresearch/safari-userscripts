@@ -16,4 +16,9 @@ cp enc/k.key enc2/k.key; K=$(od -An -tx1 enc2/k.key | tr -d " \n")
 awk 'NR==1{print; next} /MEDIA-SEQUENCE/{print "#EXT-X-MEDIA-SEQUENCE:5"; print "#EXT-X-KEY:METHOD=AES-128,URI=\"k.key\""; next} {print}' v360/index.m3u8 > enc2/index.m3u8
 i=5; for f in v360/s*.ts; do openssl aes-128-cbc -K "$K" -iv "$(printf '%032x' $i)" -in "$f" -out "enc2/$(basename "$f")"; i=$((i+1)); done
 ffmpeg $Q -i src.mp4 -c copy -hls_time 2 -hls_list_size 0 -hls_segment_type fmp4 -hls_fmp4_init_filename init.mp4 -hls_segment_filename 'fm/s%03d.m4s' fm/index.m3u8
+# alt: 영상과 소리가 따로 있는 화질 목록 (EXT-X-MEDIA AUDIO)
+mkdir -p alt/v alt/a
+ffmpeg $Q -i src.mp4 -an -c:v copy -hls_time 2 -hls_list_size 0 -hls_segment_filename 'alt/v/s%03d.ts' alt/v/index.m3u8
+ffmpeg $Q -i src.mp4 -vn -c:a copy -hls_time 2 -hls_list_size 0 -hls_segment_filename 'alt/a/s%03d.ts' alt/a/index.m3u8
+printf '#EXTM3U\n#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="aud",NAME="ko",DEFAULT=YES,URI="a/index.m3u8"\n#EXT-X-STREAM-INF:BANDWIDTH=700000,RESOLUTION=640x360,AUDIO="aud"\nv/index.m3u8\n' > alt/master.m3u8
 head -c 9000000 /dev/urandom > big.bin; cat src.mp4 big.bin > big.mp4; rm big.bin   # 4MB 넘는 파일 (나눠 받기 시험)

@@ -86,7 +86,9 @@ const serve = (route, file, req, cors, range = true) => {
   });
   await p.addInitScript(S('web-page.user.js'));
   await p.addInitScript(() => {
-    window.__kwSaveCleanMs = 4000;   // 저장 후 임시 파일 자동 삭제를 4초로 (실제 10분)
+    window.__kwSaveCleanMs = 4000;
+    // 이 시험은 '파일 앱에 저장' 방식 (영상보기 방식은 pw_library.js)
+    if (!localStorage.getItem('gm:saveSet')) localStorage.setItem('gm:saveSet', JSON.stringify('{"dest":"files"}'));   // 저장 후 임시 파일 자동 삭제를 4초로 (실제 10분)
     window.GM = {
       getValue: async (k, d) => { const v = localStorage.getItem('gm:' + k); return v === null ? d : JSON.parse(v); },
       setValue: async (k, v) => localStorage.setItem('gm:' + k, JSON.stringify(v)),
