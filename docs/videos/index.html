@@ -173,6 +173,7 @@ async function openApp(m, again) {
   let f;
   try { f = await fileCache(m); } catch (e) { return alert(e.message); }
   if (!navigator.canShare || !navigator.canShare({ files: [f] })) return play(m);
+  if (!ls.get('kwAppTip', '')) { ls.set('kwAppTip', '1'); alert('앱 목록 맨 윗줄을 오른쪽 끝까지 밀어 "More(더 보기)"를 누르면 VLC·nPlayer 등을 켜고 맨 앞으로 옮길 수 있습니다. 한 번만 해 두면 다음부터 바로 보입니다.'); }
   try { await navigator.share({ files: [f] }); }
   catch (e) {
     if (e.name === 'NotAllowedError' && !again) sheet('앱 고르기', '아래를 누르면 앱 목록이 열립니다 (VLC → "Copy to VLC" 등)', [{ t: '📲 앱 목록 열기', fn: () => openApp(m, true) }]);
