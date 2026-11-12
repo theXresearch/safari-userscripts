@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Web Save
 // @namespace    https://github.com/theXresearch/safari-userscripts
-// @version      2026.11.12.4
+// @version      2026.11.12.5
 // @author       theXresearch
 // @updateURL    https://raw.githubusercontent.com/theXresearch/safari-userscripts/main/src/web-save.meta.js
 // @downloadURL  https://raw.githubusercontent.com/theXresearch/safari-userscripts/main/src/web-save.user.js
@@ -417,12 +417,14 @@
     libBar(pend);
   };
   // 🎬 영상보기로 보내기: 영상보기 페이지를 새 탭으로 열고, 그 페이지가 준비되면 영상 파일을 하나씩 건넴 → 받았다고 하면 임시 파일 삭제
+  // 새 탭은 손가락으로 누른 바로 그 순간에만 열 수 있음 (iPhone 규칙) → 무엇보다 먼저 탭을 열고, 보낼 영상은 그다음에 찾음
   const sendToLibrary = async list => {
-    list = list || (await DB.jobs().catch(() => [])).filter(j => j.state === 'done' && !j.savedAt);
-    if (!list.length) return window.open(LIB, '_blank');
     const w = window.open(LIB, '_blank');
     if (!w) return toast('새 탭을 열 수 없음 — 다시 눌러 주세요');
+    list = list || (await DB.jobs().catch(() => [])).filter(j => j.state === 'done' && !j.savedAt);
+    if (!list.length) return;
     let sent = false;
+    setTimeout(() => { if (!sent) toast('영상보기 페이지가 응답하지 않음 — 인터넷 연결 또는 페이지 주소를 확인하세요'); }, 20000);
     const onMsg = async e => {
       if (e.source !== w || e.origin !== LIB_ORIGIN || !e.data) return;
       if (e.data.kwLib === 'ready' && !sent) {

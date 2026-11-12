@@ -41,6 +41,11 @@ const probe = f => {
     return r.fulfill({ body: '' });
   });
   await ctx.addInitScript(() => {
+    // Safari처럼: 새 탭은 누른 그 순간(같은 차례)에만 열림 — 기다린 뒤(await) 열면 막힘
+    let g = false;
+    document.addEventListener('click', e => { if (e.isTrusted) { g = true; setTimeout(() => { g = false; }, 0); } }, true);
+    const o = window.open;
+    window.open = function (...a) { return g ? o.apply(this, a) : null; };
     window.GM = { getValue: async (k, d) => { const v = localStorage.getItem('gm:' + k); return v === null ? d : JSON.parse(v); },
                   setValue: async (k, v) => localStorage.setItem('gm:' + k, JSON.stringify(v)) };
   });
@@ -56,7 +61,7 @@ const probe = f => {
   const waitFor = async (fn, ms = 30000) => { for (let t = 0; t < ms; t += 400) { if (await fn()) return true; await p.waitForTimeout(400); } return false; };
   const btnText = () => p.evaluate(() => (document.getElementById('kw-save') || {}).textContent);
   const sendAndOpen = async () => {
-    const [lib] = await Promise.all([ctx.waitForEvent('page'), p.evaluate(() => [...document.querySelectorAll('#kw-savelib button')].find(b => /영상보기/.test(b.textContent)).click())]);
+    const [lib] = await Promise.all([ctx.waitForEvent('page', { timeout: 8000 }), p.click('#kw-savelib button')]);   // 진짜 손가락 누름
     await lib.waitForLoadState();
     return lib;
   };
