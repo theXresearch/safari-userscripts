@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Web Save
 // @namespace    https://github.com/theXresearch/safari-userscripts
-// @version      2026.11.12.6
+// @version      2026.11.12.7
 // @author       theXresearch
 // @updateURL    https://raw.githubusercontent.com/theXresearch/safari-userscripts/main/src/web-save.meta.js
 // @downloadURL  https://raw.githubusercontent.com/theXresearch/safari-userscripts/main/src/web-save.user.js
@@ -25,7 +25,7 @@
   // 다 받으면 조각을 한 파일로 묶어 '파일에 저장'(파일 앱 → 다운로드) 또는 '공유'(사진 앱에 저장 등)
   const ROOT = document.documentElement;
   // 🎬 영상보기 페이지 (받은 영상 목록·재생). 이 페이지에서는 받기 기능을 쓰지 않음
-  const LIB = window.__kwLib || 'https://thexresearch.github.io/safari-userscripts/videos/';
+  const LIB = window.__kwLib || 'https://thexresearch.github.io/Tarrot/videos/';
   const LIB_ORIGIN = new URL(LIB).origin;
   if (location.href.startsWith(LIB)) return;
   const CONCURRENCY = 4;                 // 동시에 받는 조각 수

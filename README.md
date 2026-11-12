@@ -48,7 +48,7 @@ Userscripts 확장 프로그램이 주기적으로 새 버전을 확인하고, �
 4. 다른 화질은 받는 중에 ⬇를 누르거나 ⬇를 길게 누르면 열리는 화면에서 고릅니다 (★ = 기본 화질). 여러 개를 고르면 하나씩 차례로 받습니다.
 5. 받는 동안 페이지를 열어 두세요. 화면은 자동으로 켜져 있습니다. 끊기거나 페이지를 닫아도 다시 열면 이어받습니다.
 
-**🎬 영상보기** ([theXresearch.github.io/safari-userscripts/videos](https://thexresearch.github.io/safari-userscripts/videos/)) — Safari 안의 내 영상 목록
+**🎬 영상보기** ([theXresearch.github.io/Tarrot/videos](https://thexresearch.github.io/Tarrot/videos/)) — Safari 안의 내 영상 목록
 - 다 받으면 화면 아래 **🎬 영상보기에 넣기**를 한 번 누르면 영상보기 탭이 열리며 영상이 들어가고, 사이트 쪽 임시 파일은 바로 지워집니다.
 - 영상을 누르면 처음 한 번 "Safari에서 보기 / 다른 앱(VLC 등)으로 열기"를 묻고 기억합니다 (영상보기 ⚙에서 변경). 본 곳부터 이어 봅니다.
 - 길게 누르면 메뉴: 보기, 다른 앱으로 열기, 공유, 파일 앱에 저장, 이름 바꾸기, 삭제(두 번 눌러 완전히 지움).

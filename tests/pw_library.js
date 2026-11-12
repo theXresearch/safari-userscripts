@@ -7,7 +7,7 @@ const FX = path.join(__dirname, 'fixtures/hls');
 if (!fs.existsSync(path.join(FX, 'alt/master.m3u8'))) execFileSync('sh', [path.join(__dirname, 'make-hls.sh')]);
 const MUX = fs.readFileSync(require.resolve('mux.js/dist/mux-mp4.min.js'), 'utf8');
 const OUT = path.join(__dirname, 'fixtures/out'); fs.mkdirSync(OUT, { recursive: true });
-const LIB = 'https://thexresearch.github.io/safari-userscripts/videos/';
+const LIB = 'https://thexresearch.github.io/Tarrot/videos/';
 const probe = f => {
   try {
     const j = JSON.parse(execFileSync('ffprobe', ['-v', 'error', '-show_entries', 'format=duration:stream=codec_name,codec_type', '-of', 'json', f], { encoding: 'utf8' }));
