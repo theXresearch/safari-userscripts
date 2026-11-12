@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Web Main
 // @namespace    https://github.com/theXresearch/safari-userscripts
-// @version      2026.11.12.1
+// @version      2026.11.12.2
 // @author       theXresearch
 // @updateURL    https://raw.githubusercontent.com/theXresearch/safari-userscripts/main/src/web-main.meta.js
 // @downloadURL  https://raw.githubusercontent.com/theXresearch/safari-userscripts/main/src/web-main.user.js
@@ -25,7 +25,7 @@
   const NO_DARK = [];
 
   // ================= 설정 (영상 버튼 줄·🚫 줄의 ⚙, 모든 사이트 공통) =================
-  const VERSION = '2026.11.12.1';
+  const VERSION = '2026.11.12.2';
   const SET = { dark: true, copyFix: true, autoFs: true, pauseHidden: true };
   const SET_ITEMS = [
     ['dark', '다크 모드', 'iPhone이 다크 모드일 때 밝은 사이트를 어둡게'],

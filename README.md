@@ -15,7 +15,7 @@ YouTube(m.youtube.com)를 ReVanced처럼 쓰게 해 주고, 일반 사이트의 
 | [web-main.user.js](https://raw.githubusercontent.com/theXresearch/safari-userscripts/main/src/web-main.user.js) | 일반 사이트 | 영상 아래 버튼 줄, 두 번 탭·가로 회전 전체화면(탭하면 진행 막대), 벌려서 확대, 두 손가락 톡 PiP, 복사 방지 해제, 다크 모드 |
 | [web-page.user.js](https://raw.githubusercontent.com/theXresearch/safari-userscripts/main/src/web-page.user.js) | 일반 사이트 | 실드(광고 새 창·몰래 이동 차단), 백그라운드 재생, 화질 적용, hls.js 늦은 로딩 대비 |
 | [web-adblock.user.js](https://raw.githubusercontent.com/theXresearch/safari-userscripts/main/src/web-adblock.user.js) | 일반 사이트 | 광고망·광고 칸·라이브캠 광고 제거, 🚫 직접 숨김, 사이트별 실드 켜기/끄기 |
-| [web-save.user.js](https://raw.githubusercontent.com/theXresearch/safari-userscripts/main/src/web-save.user.js) | 일반 사이트 | ⬇ 영상 받기: M3U8(HLS)·MP4, 화질 선택, 암호화(AES-128) 해독, MP4 변환, 이어받기, 파일 앱·사진 앱 저장 |
+| [web-save.user.js](https://raw.githubusercontent.com/theXresearch/safari-userscripts/main/src/web-save.user.js) | 일반 사이트 | ⬇ 한 번에 영상 받기·자동 저장(제목 그대로, 1080p 기본): M3U8(HLS)·MP4, 다른 화질 선택, 암호화(AES-128) 해독, MP4 변환, 이어받기, 차례 받기, 임시 파일 자동 삭제 |
 
 YouTube용 2개와 일반 사이트용 4개는 짝으로 동작합니다. 각각 함께 설치하세요. (web-save는 web-page가 찾은 영상 주소를 씁니다)
 
@@ -43,10 +43,18 @@ Userscripts 확장 프로그램이 주기적으로 새 버전을 확인하고, �
 
 **영상 받기 (⬇)**
 1. 영상을 한 번 재생합니다 (재생해야 주소가 잡힙니다).
-2. 영상 아래 버튼 줄의 **⬇**(또는 ⚙ → '영상 받기')를 누르고 화질을 고릅니다. 화질 옆에 예상 크기가 보입니다.
-3. 받는 동안 페이지를 열어 두세요. 화면은 자동으로 켜져 있습니다. 중간에 끊기거나 페이지를 닫아도 다시 열면 이어받습니다.
-4. 다 받으면 **파일에 저장** → 파일 앱 → 다운로드 폴더. **공유**로 사진 앱 등에 저장할 수도 있습니다.
-5. 저장한 뒤 **지우기**로 Safari 안의 임시 공간을 비웁니다.
+2. 영상 아래 버튼 줄의 **⬇를 한 번** 누르면 끝입니다: 기본 화질(1080p 이하에서 가장 좋은 것)로 받고, 다 받으면 **영상 제목 그대로 자동 저장**합니다. Safari가 "다운로드할까요?"를 물으면 다운로드를 누릅니다.
+3. 저장하고 10분 뒤 Safari 안의 임시 파일은 자동으로 지워집니다.
+4. 다른 화질은 받는 중에 ⬇를 누르거나 ⬇를 길게 누르면 열리는 화면에서 고릅니다 (★ = 기본 화질). 여러 개를 고르면 하나씩 차례로 받습니다.
+5. 받는 동안 페이지를 열어 두세요. 화면은 자동으로 켜져 있습니다. 끊기거나 페이지를 닫아도 다시 열면 이어받습니다.
+
+**받기 설정** (⬇ 화면 아래, 모든 사이트 공통): 기본 화질(최고·1080·720·480·360), ⬇ 한 번에 바로 받기, 자동 저장, 저장 후 임시 파일 자동 삭제, 🧹 임시 파일 모두 지우기, 🗑 받은 영상 모두 삭제, 받은 기록.
+
+**저장 폴더 지정** (한 번만): iPhone Settings → Apps → Safari → Downloads → **On My iPhone** 안의 폴더(예: "영상")를 고릅니다.
+iCloud Drive를 고르면 영상이 iCloud로 올라가 데이터·용량을 씁니다. 같은 화면의 **Remove Download List Items → Upon Successful Download**로 두면 Safari 다운로드 목록도 자동으로 비워집니다.
+
+**🗑 받은 영상 모두 삭제 준비** (한 번만, 웹페이지는 파일 앱 파일을 직접 지울 수 없어 단축어를 씀):
+Shortcuts 앱 → + → 이름 "영상 모두 삭제" → Get Contents of Folder(저장 폴더) → Filter Files(File Extension: mp4·m4a·ts) → Delete Files.
 
 ## 설정 (YouTube 버튼 줄의 ⚙)
 

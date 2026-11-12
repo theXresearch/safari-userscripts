@@ -11,10 +11,10 @@ const OUT = path.join(__dirname, 'fixtures/out'); fs.mkdirSync(OUT, { recursive:
 const sha = b => crypto.createHash('sha1').update(b).digest('hex');
 const probe = f => {
   try {
-    const j = JSON.parse(execFileSync('ffprobe', ['-v', 'error', '-show_entries', 'format=duration:stream=codec_name', '-of', 'json', f], { encoding: 'utf8' }));
+    const j = JSON.parse(execFileSync('ffprobe', ['-v', 'error', '-show_entries', 'format=duration:stream=codec_name,height', '-of', 'json', f], { encoding: 'utf8' }));
     let dec = 'ok';
     try { const e = execFileSync('ffmpeg', ['-v', 'error', '-i', f, '-f', 'null', '-'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }); if (e.trim()) dec = 'errors'; } catch (e) { dec = 'fail'; }
-    return `codecs=${j.streams.map(s => s.codec_name).join('+')} dur=${Math.round(+j.format.duration)} decode=${dec}`;
+    return `codecs=${j.streams.map(s => s.codec_name).join('+')} h=${(j.streams.find(s => s.height) || {}).height || '-'} dur=${Math.round(+j.format.duration)} decode=${dec}`;
   } catch (e) { return 'probe fail: ' + e.message.split('\n')[0]; }
 };
 const serve = (route, file, req, cors, range = true) => {
@@ -56,12 +56,13 @@ const serve = (route, file, req, cors, range = true) => {
     if (u.hostname === 'site.test' || u.hostname === 'player.test') {
       const src = u.searchParams.get('src') || '';
       const frame = u.searchParams.get('frame');
+      const og = u.searchParams.get('og') || '샘플 영화 ABC-123 정식 제목', src2 = u.searchParams.get('src2') || '';
       const html = frame ? `<meta charset="utf-8"><title>틀 안 영상</title><body><iframe src="https://player.test/p?src=${encodeURIComponent(frame)}" width=320 height=180></iframe></body>`
-        : `<meta charset="utf-8"><title>테스트 영상 | 예시 사이트</title><body><video width=320 height=180></video><p>본문</p>
-           <script>${src ? `fetch(${JSON.stringify(src)}).then(r=>r.text()).catch(()=>{})` : ''}</script></body>`;
+        : `<meta charset="utf-8"><meta property="og:title" content="${og}"><title>${og} - 예시사이트</title><body><video width=320 height=180></video><p>본문</p>
+           <script>${[src, src2].filter(Boolean).map(x => `fetch(${JSON.stringify(x)}).then(r=>r.text()).catch(()=>{});`).join('')}</script></body>`;
       return r.fulfill({ contentType: 'text/html; charset=utf-8', body: html });
     }
-    if (slow && /\/enc\/s00[3-9]\.ts$/.test(u.pathname)) return setTimeout(() => serve(r, u.pathname.replace(/^\/hls\//, ''), req, true), 1500);
+    if (slow && /\/(enc|v240|fm)\/s00[3-9]\.(ts|m4s)$/.test(u.pathname)) return setTimeout(() => serve(r, u.pathname.replace(/^\/hls\//, ''), req, true), 4000);
     if (u.hostname === 'cdn.test') return serve(r, u.pathname.replace(/^\/hls\//, ''), req, true, !u.pathname.includes('norange'));
     if (u.hostname === 'nocors.test') return serve(r, u.pathname.replace(/^\/hls\//, ''), req, false);
     return r.fulfill({ body: '' });
@@ -78,7 +79,11 @@ const serve = (route, file, req, cors, range = true) => {
   });
   await p.addInitScript(S('web-page.user.js'));
   await p.addInitScript(() => {
-    window.GM = { xmlHttpRequest(d) {
+    window.__kwSaveCleanMs = 4000;   // 저장 후 임시 파일 자동 삭제를 4초로 (실제 10분)
+    window.GM = {
+      getValue: async (k, d) => { const v = localStorage.getItem('gm:' + k); return v === null ? d : JSON.parse(v); },
+      setValue: async (k, v) => localStorage.setItem('gm:' + k, JSON.stringify(v)),
+      xmlHttpRequest(d) {
       window.gmFetch(d.url, (d.headers || {}).Range).then(r => {
         const bin = atob(r.b64), u8 = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
         d.onload({ status: r.status, response: u8.buffer, responseHeaders: r.range ? 'content-range: ' + r.range + '\r\n' : '' });
@@ -91,114 +96,129 @@ const serve = (route, file, req, cors, range = true) => {
     await p.evaluate(S('web-save.user.js'));
     await p.waitForTimeout(1200);
   };
+  const enc = encodeURIComponent;
   const panelText = () => p.evaluate(() => (document.getElementById('kw-savepanel') || {}).innerText || '');
   const tap = txt => p.evaluate(t => { const x = [...document.querySelectorAll('#kw-savepanel button')].find(b => b.textContent.startsWith(t)); if (!x) return false; x.click(); return true; }, txt);
-  const open = async () => { await p.evaluate(() => document.getElementById('kw-save').click()); await p.waitForTimeout(1500); };
-  const waitDone = async (n = 1) => { for (let i = 0; i < 60; i++) { const t = await panelText(); if ((t.match(/완료 ·/g) || []).length >= n) return true; await p.waitForTimeout(500); } return false; };
-  const saveAs = async label => {
-    const [d] = await Promise.all([p.waitForEvent('download', { timeout: 10000 }), tap('파일에 저장')]);
-    const f = path.join(OUT, label + '-' + d.suggestedFilename());
-    await d.saveAs(f);
-    return { f, name: d.suggestedFilename() };
+  const press = () => p.evaluate(() => document.getElementById('kw-save').click());          // ⬇ 한 번 누름
+  const open = async () => { await p.evaluate(() => document.dispatchEvent(new Event('kw-open-save'))); await p.waitForTimeout(1200); };
+  const close = () => p.evaluate(() => { const x = document.getElementById('kw-savepanel'); if (x) x.remove(); });
+  // 다 받으면 저절로 저장(다운로드)되는지: fn 실행 후 다운로드를 기다림
+  const autoSaved = async (label, fn, timeout = 40000) => {
+    try {
+      const [d] = await Promise.all([p.waitForEvent('download', { timeout }), fn()]);
+      const f = path.join(OUT, label + '-' + d.suggestedFilename());
+      await d.saveAs(f);
+      return { f, name: d.suggestedFilename(), ok: true };
+    } catch (e) { return { ok: false, f: '', name: '', err: e.message.split('\n')[0] }; }
   };
-  const clean = () => p.evaluate(async () => { for (;;) { const x = [...document.querySelectorAll('#kw-savepanel button')].find(b => b.textContent === '지우기' || b.textContent === '취소'); if (!x) break; x.click(); await new Promise(r => setTimeout(r, 400)); } });
+  const cleanAll = async () => { await open(); await tap('🧹'); await p.waitForTimeout(800); await close(); };
+  const jobsLeft = () => p.evaluate(() => new Promise(res => { const r = indexedDB.open('kw-save'); r.onsuccess = () => { const q = r.result.transaction('jobs').objectStore('jobs').getAll(); q.onsuccess = () => res(q.result.length); }; }));
+  let s;
 
-  // A. 화질 목록(master) TS
-  await load('src=' + encodeURIComponent('https://cdn.test/hls/master.m3u8'));
+  // A. ⬇ 한 번 → 기본 화질(1080 이하 최고 = 360p)로 받고 영상 제목 그대로 자동 저장
+  await load('src=' + enc('https://cdn.test/hls/master.m3u8'));
   console.log('button:', await p.evaluate(() => (document.getElementById('kw-save') || {}).textContent));
+  s = await autoSaved('A', press);
+  console.log('A one tap → auto saved:', s.ok, '|', s.ok ? probe(s.f) : s.err);
   await open();
-  const t = await panelText();
-  console.log('panel variants:', (t.match(/\d+p/g) || []).join(','), '| variant playlists hidden:', !/index\.m3u8/.test(t));
-  await tap('360p');
-  console.log('A done:', await waitDone());
-  let s = await saveAs('A');
-  console.log('A name in panel:', /테스트 영상 360p\.mp4/.test(await panelText()));
-  console.log('A file:', s.name, '|', probe(s.f));
-  await clean();
+  let t = await panelText();
+  console.log('A name:', (t.match(/[^\n]*\.mp4(?= ·)/) || [''])[0], '| saved line:', /✓ 저장함 .*임시 파일 \d+분 뒤 자동 삭제/.test(t), '| default ★:', /★ 360p/.test(t));
+  // A2. 다른 화질 고르기 (화면에서 240p) → 그것도 자동 저장
+  s = await autoSaved('A2', () => tap('240p'));
+  console.log('A2 other quality:', s.ok, '|', s.ok ? probe(s.f) : s.err);
+  // A3. 저장 후 임시 파일 자동 삭제 (시험에서는 4초 + 확인 주기 10초)
+  await close();
+  await p.waitForTimeout(13000);
+  console.log('A3 temp files auto-deleted → jobs left:', await jobsLeft());
 
-  // B. 암호화 (IV 적힘) / C. 암호화 (조각 순번 IV, 순번 5부터) / D. fMP4
-  for (const [k, dir] of [['B', 'enc'], ['C', 'enc2'], ['D', 'fm']]) {
-    await load('src=' + encodeURIComponent(`https://cdn.test/hls/${dir}/index.m3u8`));
-    await open();
-    await tap('받기');
-    const ok = await waitDone();
-    s = ok ? await saveAs(k) : { f: '', name: '' };
-    console.log(`${k} ${dir}:`, ok, s.name.replace(/^.* /, ''), '|', ok ? probe(s.f) : (await panelText()).slice(0, 300));
-    await clean();
-  }
-
-  // E. MP4 나눠 받기 (Range) / F. 서버가 Range 무시
+  // B. 암호화 (IV 적힘) / C. 암호화 (조각 순번 IV, 순번 5부터) / D. fMP4 / E. MP4 나눠 받기 / F. 서버가 Range 무시
   const big = sha(fs.readFileSync(path.join(FX, 'big.mp4')));
-  for (const [k, u] of [['E', 'https://cdn.test/hls/big.mp4'], ['F', 'https://cdn.test/hls/norange/big.mp4']]) {
-    await load('src=' + encodeURIComponent(u));
-    await open();
-    await tap('받기');
-    const ok = await waitDone();
-    s = ok ? await saveAs(k) : { f: '' };
-    console.log(`${k} mp4:`, ok, s.name, '| same bytes:', ok && sha(fs.readFileSync(s.f)) === big);
-    await clean();
+  for (const [k, u] of [['B', 'enc/index.m3u8'], ['C', 'enc2/index.m3u8'], ['D', 'fm/index.m3u8'], ['E', 'big.mp4'], ['F', 'norange/big.mp4']]) {
+    await load('src=' + enc('https://cdn.test/hls/' + u));
+    s = await autoSaved(k, press);
+    console.log(`${k} ${u}:`, s.ok, '|', !s.ok ? s.err : u.endsWith('.mp4') ? 'same bytes: ' + (sha(fs.readFileSync(s.f)) === big) : probe(s.f));
+    await cleanAll();
   }
 
   // G. 다른 서버가 CORS로 막음 → GM으로 받기
   gmCalls = 0;
-  await load('src=' + encodeURIComponent('https://nocors.test/hls/master.m3u8'));
-  await open();
-  await tap('240p');
-  const g = await waitDone();
-  s = g ? await saveAs('G') : { f: '' };
-  console.log('G nocors via GM:', g, 'gm calls:', gmCalls, '|', g ? probe(s.f) : await panelText());
-  await clean();
+  await load('src=' + enc('https://nocors.test/hls/master.m3u8'));
+  s = await autoSaved('G', press);
+  console.log('G nocors via GM:', s.ok, 'gm calls:', gmCalls, '|', s.ok ? probe(s.f) : s.err);
+  await cleanAll();
 
   // H. 이어받기: 받는 중 멈춤 → 페이지 다시 열기 → 계속
   slow = true;
-  await load('src=' + encodeURIComponent('https://cdn.test/hls/enc/index.m3u8'));
-  await open();
-  await tap('받기');
-  await p.waitForTimeout(900);
-  await tap('멈춤');
-  await p.waitForTimeout(2000);
+  await load('src=' + enc('https://cdn.test/hls/enc/index.m3u8'));
+  await press();
+  await p.waitForTimeout(1000);
+  await open(); await tap('멈춤'); await p.waitForTimeout(2000);
   const mid = await p.evaluate(() => (document.querySelector('[data-info]') || {}).textContent);
   slow = false;
-  await load('src=' + encodeURIComponent('https://cdn.test/hls/enc/index.m3u8'));
+  await load('src=' + enc('https://cdn.test/hls/enc/index.m3u8'));
   await open();
-  console.log('H after reload:', mid, '→', /멈춤/.test(await panelText()) ? 'shows 멈춤' : 'no', '| 계속:', await tap('계속'));
-  const h = await waitDone();
-  s = h ? await saveAs('H') : { f: '' };
-  console.log('H resumed:', h, '|', h ? probe(s.f) : await panelText());
-  await clean();
+  const pausedShown = /멈춤/.test(await panelText());
+  s = await autoSaved('H', () => tap('계속'));
+  console.log('H after reload:', mid, '→', pausedShown ? 'shows 멈춤' : 'no', '| resumed+saved:', s.ok, '|', s.ok ? probe(s.f) : s.err);
+  await cleanAll();
 
-  // H2. 받는 중에 페이지를 닫았다 다시 열면 자동으로 이어받기
+  // H2. 받는 중에 페이지를 닫았다 다시 열면 자동으로 이어받고 저장
   slow = true;
-  await load('src=' + encodeURIComponent('https://cdn.test/hls/enc/index.m3u8'));
-  await open();
-  await tap('받기');
+  await load('src=' + enc('https://cdn.test/hls/enc/index.m3u8'));
+  await press();
   await p.waitForTimeout(1000);
-  const mid2 = await p.evaluate(() => (document.querySelector('[data-info]') || {}).textContent);
   slow = false;
-  await load('');
+  s = await autoSaved('H2', () => load(''));
+  console.log('H2 auto resume+save:', s.ok, '|', s.ok ? probe(s.f) : s.err);
+  await cleanAll();
+
+  // K. 두 개를 받으면 하나씩 차례로
+  await load('src=' + enc('https://cdn.test/hls/v240/index.m3u8') + '&src2=' + enc('https://cdn.test/hls/fm/index.m3u8'));
   await open();
-  const h2 = await waitDone();
-  console.log('H2 auto resume:', mid2, '→', h2, '| button:', await p.evaluate(() => document.getElementById('kw-save') ? 'shown' : 'none'));
-  if (h2) { s = await saveAs('H2'); console.log('H2 file:', probe(s.f)); }
-  await clean();
+  const downloads = [];
+  p.on('download', d => downloads.push(d));
+  slow = true;   // 첫 번째가 오래 걸리도록 (enc 아님 → v240 조각을 느리게)
+  await p.evaluate(() => { const bs = [...document.querySelectorAll('#kw-savepanel button')].filter(b => b.textContent === '받기'); bs.forEach(b => b.click()); });
+  await p.waitForTimeout(2500);
+  const kt = await panelText();
+  const queued = /차례 기다리는 중/.test(kt);
+  slow = false;
+  await p.waitForTimeout(20000);
+  console.log('K queue:', queued, '| both saved:', downloads.length, '| init.mp4 hidden:', !/init\.mp4/.test(await panelText()));
+  await close();
+  await cleanAll();
+
+  // L. 저장 공간이 모자라면 시작하지 않음
+  await load('src=' + enc('https://cdn.test/hls/master.m3u8'));
+  await p.evaluate(() => Object.defineProperty(navigator, 'storage', { configurable: true, value: { estimate: async () => ({ quota: 1000, usage: 900 }), persist: async () => true } }));
+  await p.evaluate(() => Object.defineProperty(document.querySelector('video'), 'duration', { get: () => 600 }));
+  await press(); await p.waitForTimeout(1500);
+  console.log('L low space:', await p.evaluate(() => (document.getElementById('kw-savetoast') || {}).textContent), '| jobs:', await jobsLeft());
+
+  // M. 긴 제목 → 파일 이름 200바이트 이내, 못 쓰는 글자 제거
+  await load('src=' + enc('https://cdn.test/hls/v240/index.m3u8') + '&og=' + enc('가'.repeat(120) + ' a/b:c'));
+  await open(); await tap('받기'); await p.waitForTimeout(500);
+  const nm = await p.evaluate(() => (document.querySelector('#kw-savepanel [data-info]') || {}).parentElement.firstChild.textContent);
+  console.log('M long name bytes<=200:', Buffer.byteLength(nm.replace(/\.(mp4|ts)$/, '')) <= 200, '| no slash:', !/[/:]/.test(nm));
+  await close(); await cleanAll();
+  console.log('M after clean-all jobs:', await jobsLeft());
 
   // I. iframe 안 플레이어 → 바깥 페이지 ⬇ 목록에 표시
-  await p.goto('https://site.test/x?frame=' + encodeURIComponent('https://cdn.test/hls/v240/index.m3u8'));
+  await p.goto('https://site.test/x?frame=' + enc('https://cdn.test/hls/v240/index.m3u8'));
   await p.evaluate(MUX); await p.evaluate(S('web-save.user.js'));
   await p.waitForTimeout(1500);
   await open();
-  console.log('I iframe media listed:', /조각 10개/.test(await panelText()));
+  t = await panelText();
+  console.log('I iframe media listed:', /조각 10개/.test(t), '| settings shown:', /기본 화질/.test(t) && /저장 폴더 지정/.test(t) && /받은 영상 모두 삭제/.test(t), '| history:', (t.match(/받은 기록 (\d+)개/) || [])[1]);
+  await close();
 
   // J. MP4 변환기(mux.js)를 못 불러온 경우 → .ts로 저장
-  await load('src=' + encodeURIComponent('https://cdn.test/hls/v240/index.m3u8'), false);
+  await load('src=' + enc('https://cdn.test/hls/v240/index.m3u8'), false);
+  s = await autoSaved('J', press);
   await open();
-  await tap('받기');
-  const jd = await waitDone();
-  const jName = ((await panelText()).match(/[^\n]*\.(ts|mp4)(?=\n)/) || [''])[0];
-  s = jd ? await saveAs('J') : { f: '', name: '' };
-  console.log('J no mux:', jd, jName, '|', jd ? probe(s.f) : '');
-  await clean();
-  console.log('storage line:', /저장 공간: 사용/.test(await panelText()));
+  const jName = await p.evaluate(() => { const i = document.querySelector('#kw-savepanel [data-info]'); return i ? i.parentElement.firstChild.textContent : ''; });
+  console.log('J no mux:', s.ok, jName, '|', s.ok ? probe(s.f) : s.err);
+  await close(); await cleanAll();
   console.log('errors:', JSON.stringify(errors));
   await ctx.close(); if (b) await b.close();
 })();

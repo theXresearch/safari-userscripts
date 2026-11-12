@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YT Main
 // @namespace    https://github.com/theXresearch/safari-userscripts
-// @version      2026.11.12.1
+// @version      2026.11.12.2
 // @author       theXresearch
 // @updateURL    https://raw.githubusercontent.com/theXresearch/safari-userscripts/main/src/yt-main.meta.js
 // @downloadURL  https://raw.githubusercontent.com/theXresearch/safari-userscripts/main/src/yt-main.user.js

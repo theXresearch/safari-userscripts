@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Web Page
 // @namespace    https://github.com/theXresearch/safari-userscripts
-// @version      2026.11.12.1
+// @version      2026.11.12.2
 // @author       theXresearch
 // @updateURL    https://raw.githubusercontent.com/theXresearch/safari-userscripts/main/src/web-page.meta.js
 // @downloadURL  https://raw.githubusercontent.com/theXresearch/safari-userscripts/main/src/web-page.user.js
@@ -139,7 +139,7 @@
   const noteMedia = (url, hint) => {
     let u;
     try { u = new URL(String(url || ''), location.href).href; } catch (e) { return; }
-    if (!/^https?:/.test(u) || /\.(ts|m4s|aac|key|vtt|jpg|png)([?#]|$)/i.test(u)) return;   // 조각·자막·그림은 제외
+    if (!/^https?:/.test(u) || /\.(ts|m4s|aac|key|vtt|jpg|png)([?#]|$)/i.test(u) || /\/init[^/]*\.mp4/i.test(u)) return;   // 조각·머리 파일·자막·그림은 제외
     const t = hint || (/\.m3u8|m3u8/i.test(u) ? 'hls' : /\.(mp4|m4v|mov|webm)([?#]|$)/i.test(u) ? 'file' : '');
     if (!t) return;
     const i = media.findIndex(m => m.u === u);
