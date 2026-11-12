@@ -1,11 +1,11 @@
 // ==UserScript==
 // @name         Web Page
 // @namespace    https://github.com/theXresearch/safari-userscripts
-// @version      2026.11.05.7
+// @version      2026.11.12.1
 // @author       theXresearch
 // @updateURL    https://raw.githubusercontent.com/theXresearch/safari-userscripts/main/src/web-page.meta.js
 // @downloadURL  https://raw.githubusercontent.com/theXresearch/safari-userscripts/main/src/web-page.user.js
-// @description  일반 사이트 페이지 안쪽 처리: 실드(광고 새 창·몰래 이동 차단), 화면 숨김 감지 차단(PiP 백그라운드 재생), 광고차단 감지 무력화, 화질 적용, hls.js 늦은 로딩 대비
+// @description  일반 사이트 페이지 안쪽 처리: 실드(광고 새 창·몰래 이동 차단), 영상 주소 기록(⬇ 받기용), 화면 숨김 감지 차단(PiP 백그라운드 재생), 광고차단 감지 무력화, 화질 적용, hls.js 늦은 로딩 대비
 // @match        *://*/*
 // @exclude      *://*.youtube.com/*
 // @run-at       document-start
@@ -123,6 +123,59 @@
       if (isAd(url) || sneakyNav) { e.preventDefault(); bump(); }
     });
   }
+
+  // ================= 1-2. 영상 주소 기록 (web-save의 ⬇ 받기에 사용, 광고 iframe·플레이어 iframe 안에서도) =================
+  // 사이트 플레이어가 불러오는 재생 목록(.m3u8)·영상 파일(.mp4 등) 주소를 적어 둠 (요청 자체는 그대로 통과).
+  // 바깥 페이지: <html data-kw-media> / iframe 안: 바깥 페이지로 전달(postMessage)
+  const media = [];
+  let mediaTimer = 0;
+  const publishMedia = () => {
+    mediaTimer = 0;
+    try {
+      if (window.top === window.self) document.documentElement.dataset.kwMedia = JSON.stringify(media);
+      else window.top.postMessage({ kwMedia: media }, '*');
+    } catch (e) {}
+  };
+  const noteMedia = (url, hint) => {
+    let u;
+    try { u = new URL(String(url || ''), location.href).href; } catch (e) { return; }
+    if (!/^https?:/.test(u) || /\.(ts|m4s|aac|key|vtt|jpg|png)([?#]|$)/i.test(u)) return;   // 조각·자막·그림은 제외
+    const t = hint || (/\.m3u8|m3u8/i.test(u) ? 'hls' : /\.(mp4|m4v|mov|webm)([?#]|$)/i.test(u) ? 'file' : '');
+    if (!t) return;
+    const i = media.findIndex(m => m.u === u);
+    if (i >= 0) media.splice(i, 1);
+    media.push({ u, t, at: Date.now(), page: location.href });
+    if (media.length > 30) media.shift();
+    if (!mediaTimer) mediaTimer = setTimeout(publishMedia, 300);
+  };
+  const MEDIA_CT = /mpegurl/i;
+  try {
+    const of = window.fetch;
+    window.fetch = function (...a) {
+      const p = of.apply(this, a);
+      try {
+        const url = String((a[0] && a[0].url) || a[0] || '');
+        noteMedia(url);
+        p.then(r => { if (MEDIA_CT.test(r.headers.get('content-type') || '')) noteMedia(r.url || url, 'hls'); }).catch(noop);
+      } catch (e) {}
+      return p;
+    };
+    const oo = XMLHttpRequest.prototype.open;
+    XMLHttpRequest.prototype.open = function (m, url, ...r) {
+      try {
+        noteMedia(url);
+        this.addEventListener('load', () => { try { if (MEDIA_CT.test(this.getResponseHeader('content-type') || '')) noteMedia(this.responseURL || url, 'hls'); } catch (e) {} });
+      } catch (e) {}
+      return oo.call(this, m, url, ...r);
+    };
+  } catch (e) {}
+  // 플레이어가 영상 주소를 직접 넣는 경우 (Safari 기본 재생)
+  setInterval(() => {
+    document.querySelectorAll('video, video source').forEach(v => {
+      const s = v.currentSrc || v.src || '';
+      if (s && !/^blob:/.test(s)) noteMedia(s, /m3u8/i.test(s) ? 'hls' : 'file');
+    });
+  }, 2000);
 
   if (window.top !== window.self) return;   // 아래는 바깥 페이지에서만
   const markReady = () => { if (document.documentElement) document.documentElement.dataset.kwPage = shield ? 'on' : 'off'; else setTimeout(markReady, 10); };
@@ -277,6 +330,7 @@
   setInterval(() => {
     if (!document.querySelector('video')) return;
     hookHls();
+    hlsList.forEach(h => { if (h.url) noteMedia(h.url, 'hls'); });   // hls.js가 연 재생 목록 (영상 받기용)
     const q = document.documentElement.dataset.kwQuality || 'auto';
     const want = q === 'auto' ? 0 : num(q);
     const all = new Set();

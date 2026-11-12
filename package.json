@@ -4,12 +4,13 @@
   "private": true,
   "description": "iPhone Safari userscripts (Userscripts app): ReVanced-style YouTube + video/ad improvements for all sites",
   "scripts": {
-    "lint": "eslint --no-eslintrc --env browser,es2022 --parser-options=ecmaVersion:2022 --global GM --rule \"{\\\"no-undef\\\":\\\"error\\\",\\\"no-unused-vars\\\":\\\"error\\\"}\" src",
+    "lint": "eslint --no-eslintrc --env browser,es2022 --parser-options=ecmaVersion:2022 --global GM,muxjs --rule \"{\\\"no-undef\\\":\\\"error\\\",\\\"no-unused-vars\\\":\\\"error\\\"}\" src",
     "test": "node tests/run-all.js"
   },
   "devDependencies": {
     "eslint": "^8.57.0",
     "jsdom": "^24.1.0",
+    "mux.js": "^6.3.0",
     "playwright": "^1.48.0"
   }
 }

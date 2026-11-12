@@ -1,11 +1,11 @@
 // ==UserScript==
 // @name         Web Main
 // @namespace    https://github.com/theXresearch/safari-userscripts
-// @version      2026.11.05.7
+// @version      2026.11.12.1
 // @author       theXresearch
 // @updateURL    https://raw.githubusercontent.com/theXresearch/safari-userscripts/main/src/web-main.meta.js
 // @downloadURL  https://raw.githubusercontent.com/theXresearch/safari-userscripts/main/src/web-main.user.js
-// @description  일반 사이트: ⚙ 설정·작동 상태 / 영상: PiP·화질·속도 버튼(영상 아래), 두 번 탭·가로 회전 전체화면(탭하면 진행 막대, 밀어서 이동·밝기), 벌려서 확대, 두 손가락 톡 PiP / 복사 방지 해제, 다크 모드 (광고는 web-adblock)
+// @description  일반 사이트: ⚙ 설정·작동 상태 / 영상: PiP·화질·속도·⬇받기 버튼(영상 아래), 두 번 탭·가로 회전 전체화면(탭하면 진행 막대, 밀어서 이동·밝기), 벌려서 확대, 두 손가락 톡 PiP / 복사 방지 해제, 다크 모드 (광고는 web-adblock)
 // @match        *://*/*
 // @exclude      *://*.youtube.com/*
 // @run-at       document-start
@@ -25,7 +25,7 @@
   const NO_DARK = [];
 
   // ================= 설정 (영상 버튼 줄·🚫 줄의 ⚙, 모든 사이트 공통) =================
-  const VERSION = '2026.11.05.7';
+  const VERSION = '2026.11.12.1';
   const SET = { dark: true, copyFix: true, autoFs: true, pauseHidden: true };
   const SET_ITEMS = [
     ['dark', '다크 모드', 'iPhone이 다크 모드일 때 밝은 사이트를 어둡게'],
@@ -233,6 +233,9 @@
     L.push(ds.kwPage ? [ok, 'Web Page 연결됨 (실드·백그라운드 재생·화질)'] : [warn, 'Web Page가 동작하지 않음 — 설치·켜짐 확인']);
     L.push(ds.kwPage === 'off' ? [no, '이 사이트 실드: 꺼짐 (🚫 줄에서 켜기)'] : [ok, `실드 켜짐 · 막은 광고 창·이동 ${ds.kwStBlocked || 0}번`]);
     L.push(ds.kwAd ? [ok, `광고 차단 동작 중 · 지운 광고 ${ds.kwStAds || 0}개`] : [warn, 'Web AdBlock이 동작하지 않음 — 설치·켜짐 확인']);
+    let sv = null; try { sv = JSON.parse(ds.kwSave || 'null'); } catch (e) {}
+    L.push(sv ? [ok, `영상 받기 동작 중 · 찾은 영상 주소 ${sv.found}개${sv.active ? ` · 받는 중 ${sv.active}개` : ''}${sv.mux ? '' : ' · MP4 변환기 없음(.ts로 저장)'}`]
+      : [warn, 'Web Save가 동작하지 않음 — 설치·켜짐 확인']);
     if (v && v.readyState > 0) {
       L.push([ok, `영상 ${v.videoWidth}×${v.videoHeight}${isFinite(v.duration) ? ' · ' + fmtT(v.duration) : ' · 실시간'} · ${v.paused ? '멈춤' : '재생 중'} · ${prefs.speed}x`]);
       L.push(q.length ? [ok, `고를 수 있는 화질: ${q.map(x => x + 'p').join(', ')}`] : [no, '이 영상은 화질 선택 불가 (Safari 자동)']);
@@ -262,6 +265,9 @@
       sheet.appendChild(mk('div', 'display:flex;align-items:center;gap:12px;padding:10px 0;border-top:1px solid #333',
         mk('div', 'flex:1', mk('div', '', label), mk('div', 'color:#999;font-size:12px;margin-top:2px', desc)), sw));
     });
+    const saveRow = mk('button', 'width:100%;margin-top:8px;padding:11px;border:none;border-radius:10px;background:#0a84ff;color:#fff;font:600 15px -apple-system,sans-serif', '⬇ 영상 받기 · 받은 영상 저장');
+    saveRow.addEventListener('click', () => { wrap.remove(); document.dispatchEvent(new Event('kw-open-save')); });
+    sheet.appendChild(saveRow);
     const statBox = mk('div', 'margin-top:12px;padding:10px 12px;border-radius:10px;background:#2c2c2e;font:13px/1.55 -apple-system,sans-serif');
     statBox.id = 'kw-stat';
     const paintStat = () => statBox.replaceChildren(mk('div', 'font-weight:700;margin-bottom:4px', '작동 상태 (이 페이지)'),
@@ -397,8 +403,11 @@
   const showSiteBars = () => document.querySelectorAll('[data-kw-fshide]').forEach(el => el.removeAttribute('data-kw-fshide'));
 
   const placeBar = bar => {
-    const pick = document.getElementById('kw-pick');           // web-adblock의 🚫 버튼도 같은 줄로
-    if (pick && pick.parentElement !== bar) { bar.appendChild(pick); pick.style.cssText = BTN_CSS + 'min-width:0;'; }
+    // web-save의 ⬇(영상 받기)·web-adblock의 🚫 버튼도 같은 줄로
+    ['kw-save', 'kw-pick'].forEach(id => {
+      const b = document.getElementById(id);
+      if (b && b.parentElement !== bar) { bar.appendChild(b); b.style.cssText = BTN_CSS + 'min-width:0;'; }
+    });
     const fs = pseudoFs.video();
     const v = fs || activeVideo();
     const box = !fs && v && playerBox(v);
@@ -432,7 +441,7 @@
     vids.forEach(v => { if (v.hasAttribute('disablepictureinpicture')) v.removeAttribute('disablepictureinpicture'); });
     let bar = document.getElementById('kw-tools');
     if (!vids.length) {
-      if (bar) { const pick = document.getElementById('kw-pick'); if (pick) pick.remove(); bar.remove(); }   // 🚫는 web-adblock이 원래 자리에 다시 만듦
+      if (bar) { ['kw-pick', 'kw-save'].forEach(id => { const b = document.getElementById(id); if (b && bar.contains(b)) b.remove(); }); bar.remove(); }   // 🚫·⬇는 각 스크립트가 원래 자리에 다시 만듦
       return;
     }
     if (!bar) {

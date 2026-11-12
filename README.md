@@ -1,7 +1,7 @@
 # Safari Userscripts — iPhone에서 ReVanced처럼 YouTube 보기
 
 iPhone Safari의 [Userscripts](https://apps.apple.com/app/userscripts/id1463298887) 앱에서 쓰는 스크립트 모음입니다.
-YouTube(m.youtube.com)를 ReVanced처럼 쓰게 해 주고, 일반 사이트의 영상 보기와 광고 처리도 개선합니다.
+YouTube(m.youtube.com)를 ReVanced처럼 쓰게 해 주고, 일반 사이트의 영상 보기와 광고 처리를 개선하며, 영상(M3U8·MP4)을 폰에 받아 데이터 없이 나중에 볼 수 있게 합니다.
 
 ## 설치
 
@@ -15,8 +15,9 @@ YouTube(m.youtube.com)를 ReVanced처럼 쓰게 해 주고, 일반 사이트의 
 | [web-main.user.js](https://raw.githubusercontent.com/theXresearch/safari-userscripts/main/src/web-main.user.js) | 일반 사이트 | 영상 아래 버튼 줄, 두 번 탭·가로 회전 전체화면(탭하면 진행 막대), 벌려서 확대, 두 손가락 톡 PiP, 복사 방지 해제, 다크 모드 |
 | [web-page.user.js](https://raw.githubusercontent.com/theXresearch/safari-userscripts/main/src/web-page.user.js) | 일반 사이트 | 실드(광고 새 창·몰래 이동 차단), 백그라운드 재생, 화질 적용, hls.js 늦은 로딩 대비 |
 | [web-adblock.user.js](https://raw.githubusercontent.com/theXresearch/safari-userscripts/main/src/web-adblock.user.js) | 일반 사이트 | 광고망·광고 칸·라이브캠 광고 제거, 🚫 직접 숨김, 사이트별 실드 켜기/끄기 |
+| [web-save.user.js](https://raw.githubusercontent.com/theXresearch/safari-userscripts/main/src/web-save.user.js) | 일반 사이트 | ⬇ 영상 받기: M3U8(HLS)·MP4, 화질 선택, 암호화(AES-128) 해독, MP4 변환, 이어받기, 파일 앱·사진 앱 저장 |
 
-YouTube용 2개와 일반 사이트용 3개는 짝으로 동작합니다. 각각 함께 설치하세요.
+YouTube용 2개와 일반 사이트용 4개는 짝으로 동작합니다. 각각 함께 설치하세요. (web-save는 web-page가 찾은 영상 주소를 씁니다)
 
 ## 업데이트
 
@@ -40,6 +41,13 @@ Userscripts 확장 프로그램이 주기적으로 새 버전을 확인하고, �
 - 영상을 두 번 탭하거나 가로로 돌리면 전체화면. 전체화면에서 왼쪽·오른쪽 1/3 두 번 탭 = 10초 이동, 가운데 두 번 탭 = 끄기. 전체화면에서 한 번 탭하면 진행 막대·재생 버튼이 나타났다가 3초 뒤 사라짐
 - 🚫 → 광고 탭 → 한 번 더 탭하면 그 사이트에서 영구 숨김. 🛡 버튼으로 그 사이트의 실드 끄기
 
+**영상 받기 (⬇)**
+1. 영상을 한 번 재생합니다 (재생해야 주소가 잡힙니다).
+2. 영상 아래 버튼 줄의 **⬇**(또는 ⚙ → '영상 받기')를 누르고 화질을 고릅니다. 화질 옆에 예상 크기가 보입니다.
+3. 받는 동안 페이지를 열어 두세요. 화면은 자동으로 켜져 있습니다. 중간에 끊기거나 페이지를 닫아도 다시 열면 이어받습니다.
+4. 다 받으면 **파일에 저장** → 파일 앱 → 다운로드 폴더. **공유**로 사진 앱 등에 저장할 수도 있습니다.
+5. 저장한 뒤 **지우기**로 Safari 안의 임시 공간을 비웁니다.
+
 ## 설정 (YouTube 버튼 줄의 ⚙)
 
 | 항목 | 기본 |
@@ -62,21 +70,23 @@ Userscripts 확장 프로그램이 주기적으로 새 버전을 확인하고, �
 
 **일반 사이트 ⚙** (영상 버튼 줄 또는 🚫 줄): 다크 모드, 복사·선택 방지 해제, 가로 자동 전체화면, 안 보이는 영상 자동 정지를 켜고 끄고, 작동 상태(실드로 막은 횟수, 지운 광고 수, 영상·화질 정보)를 봅니다.
 
-반복 노출 횟수(`SEEN_MAX`), 반복 노출 횟수(`SEEN_MAX`), 휴식 간격(`BREAK_MS`)은 `yt-main.user.js` 위쪽에서 바꿀 수 있습니다.
+반복 노출 횟수(`SEEN_MAX`), 휴식 간격(`BREAK_MS`)은 `yt-main.user.js` 위쪽에서 바꿀 수 있습니다.
 
 ## 알려진 한계
 
 - **백그라운드 재생**: 2026년 초부터 YouTube가 모바일 브라우저의 백그라운드 재생을 막고 있습니다. 화면 숨김 감지 차단으로 대응하지만, 가장 확실한 방법은 PiP입니다.
 - **영상에 붙여 보내는 광고(SSAP)**: 미리 뺄 수 없어서 '건너뛰기' 버튼으로 대응합니다.
 - **YouTube 화면 구조 변경**: m.youtube.com 구조가 바뀌면 일부 숨김 기능이 동작하지 않을 수 있습니다.
+- **영상 받기**: YouTube 영상은 받지 않습니다 (YouTube 약관, 오프라인 저장은 YouTube Premium). 실시간 방송, DRM(FairPlay·SAMPLE-AES) 보호 영상은 받을 수 없습니다. 소리가 따로 나오는 영상은 영상·소리 두 파일로 저장됩니다. 받는 중 화면을 끄거나 다른 앱으로 가면 iPhone이 멈추게 하므로, 돌아오면 이어서 받습니다. 개인정보 보호 탭에서는 큰 영상이 메모리 부족으로 실패할 수 있습니다.
+- **Chrome 대안**: iPhone의 Chrome은 확장 프로그램·유저스크립트를 지원하지 않아 Safari보다 기능이 적습니다. 이 스크립트는 Safari 전용입니다.
 
 ## 개발
 
 ```bash
 npm install
-npx playwright install chromium
+npx playwright install chromium webkit   # webkit = Safari 엔진
 npm run lint
-npm test        # tests/run-all.js — 시험 25개 (가짜 페이지로 동작 확인)
+npm test        # tests/run-all.js — 시험 28개 (가짜 페이지 + 실제 HLS 영상 받기, ffmpeg 필요)
 ```
 
 GitHub에 올리면(push) 자동으로 시험이 돌아갑니다(`.github/workflows/test.yml`).
@@ -85,3 +95,4 @@ GitHub에 올리면(push) 자동으로 시험이 돌아갑니다(`.github/workfl
 - SponsorBlock k-익명 조회: https://github.com/ajayyy/SponsorBlock/wiki/K-Anonymity
 - 광고 일정 미리 빼기(json-prune 방식): uBlock Origin / AdGuard YouTube 규칙
 - 원래 음성 고정: Greasy Fork "YouTube Original Audio Priority"
+- HLS → MP4 변환: [mux.js](https://github.com/videojs/mux.js) (Apache-2.0, `@require`로 불러옴). 받기 방식은 Momo707577045/m3u8-downloader, Greasy Fork "StreamGrabber" 참고

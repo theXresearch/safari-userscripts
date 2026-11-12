@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YT Main
 // @namespace    https://github.com/theXresearch/safari-userscripts
-// @version      2026.11.05.7
+// @version      2026.11.12.1
 // @author       theXresearch
 // @updateURL    https://raw.githubusercontent.com/theXresearch/safari-userscripts/main/src/yt-main.meta.js
 // @downloadURL  https://raw.githubusercontent.com/theXresearch/safari-userscripts/main/src/yt-main.user.js
@@ -41,7 +41,7 @@
   const loadJson = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) || d; } catch (e) { return d; } };
 
   // ================= 설정 (⚙ 버튼으로 켜고 끔, yt-page도 같은 값을 읽음) =================
-  const VERSION = '2026.11.05.7';   // 위 @version과 같게 (⚙ 작동 상태에 표시)
+  const VERSION = '2026.11.12.1';   // 위 @version과 같게 (⚙ 작동 상태에 표시)
   const SET = Object.assign({ prune: true, origAudio: true, sb: true, chanSpeed: true, fresh: true, rest: true, tidy: true, endCards: true,
     shortsNormal: false, swipeBack: true, capLang: '', sbCats: SB_ALL.filter(c => c[2]).map(c => c[0]) }, loadJson('krSet', {}));
   const saveSet = () => localStorage.setItem('krSet', JSON.stringify(SET));

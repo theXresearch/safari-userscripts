@@ -12,7 +12,7 @@ const EXPECT = {
                 /back to 강의채널 label: 1\.5x/, /after off: like= inline endcard= block/, /errors: \[\]/],
   pw_phase3: [/gear label: 🌙 영상 끝/, /SB refetch cats: \["selfpromo"/, /sleep end → cmds: 1 pause \| gear after: ⚙/,
               /double-tap cmds: .*seek:90.*seek:110/, /web fs double-tap: left→ 90 \| right x2→ 110 \| middle exits fs: true → false/, /errors: \[\]/],
-  pw_phase4: [/✓ 광고 일정 1건 제거/, /✓ 원래 음성으로 바꿈/, /✓ 자막 켬: 한국어/, /✓ 화면 구조 정상/, /버전 2026\.11\.05\.7/,
+  pw_phase4: [/✓ 광고 일정 1건 제거/, /✓ 원래 음성으로 바꿈/, /✓ 자막 켬: 한국어/, /✓ 화면 구조 정상/, /버전 2026\.11\.12\.1/,
               /shorts link click → \/watch\?v=SHORTSID001/, /open shorts URL → \/watch\?v=SHORTSID002/,
               /✓ 실드 켜짐 · 막은 광고 창·이동 1번/, /지운 광고 1개/, /dark after off: false/, /open from 🚫 bar event: true/, /errors: \[\]/],
   pw_swipeback: [/short drag 80px: .*after: \/watch \| transform none/, /sideways drag: .*still \/watch/, /long drag 320px: .*after: \/ \| home visible: true/, /errors: \[\]/],
@@ -26,6 +26,13 @@ const EXPECT = {
   test_media: [/YT\.play, YT\.pause, YT\.next/, /화면 꺼짐 → 즉시 명령: 다음 영상/],
   test_pip: [/다시 누름 → PiP→inline/],
   // ── 일반 사이트 ──
+  pw_save: [/panel variants: 360p,240p \| variant playlists hidden: true/, /A name in panel: true/, /A file: .*codecs=h264\+aac dur=20 decode=ok/,
+            /B enc: true .*dur=20 decode=ok/, /C enc2: true .*dur=20 decode=ok/, /D fm: true .*dur=20 decode=ok/,
+            /E mp4: true .*same bytes: true/, /F mp4: true .*same bytes: true/, /G nocors via GM: true gm calls: 1\d .*decode=ok/,
+            /H after reload: [1-8]\d% .*shows 멈춤/, /H resumed: true .*dur=20 decode=ok/, /H2 auto resume: .*→ true/, /H2 file: .*dur=20 decode=ok/,
+            /I iframe media listed: true/, /J no mux: true .*\.ts .*decode=ok/, /errors: \[\]/],
+  'pw_save@webkit': 'pw_save',
+  'pw_save@webkit-private': 'pw_save',
   pw_shield: [/shield on → url: https:\/\/missav\.test\/ popups: \[\]/, /real link → https:\/\/news\.example\.org/],
   pw_all: [/cam video removed: true/, /landscape: player kw-fs/],
   pw_cam: [/cams=0 camwrap=none preview=true/],
@@ -48,10 +55,13 @@ for (const f of fs.readdirSync(path.join(__dirname, '../src')).filter(n => n.end
   const ok = fs.existsSync(metaPath) && fs.readFileSync(metaPath, 'utf8') === head;
   if (!ok) { failed++; console.log(`✗ ${f}: .meta.js가 없거나 머리말과 다름 → node tools/make-meta.js`); } else console.log(`✓ ${f} 머리말 = .meta.js`);
 }
-for (const [name, checks] of Object.entries(EXPECT)) {
+// 'pw_save@webkit' = 같은 시험을 WebKit(Safari 엔진)으로, '-private' = 개인정보 보호 탭처럼
+for (const [name, spec] of Object.entries(EXPECT)) {
+  const [file, br] = name.split('@'), checks = typeof spec === 'string' ? EXPECT[spec] : spec;
+  const env = Object.assign({}, process.env, br ? { BROWSER: br.replace('-private', ''), PRIVATE: br.endsWith('-private') ? '1' : '' } : {});
   let out = '';
   try {
-    out = execFileSync(process.execPath, [path.join(__dirname, name + '.js')], { encoding: 'utf8', timeout: 120000, stdio: ['ignore', 'pipe', 'pipe'] });
+    out = execFileSync(process.execPath, [path.join(__dirname, file + '.js')], { encoding: 'utf8', timeout: 300000, env, stdio: ['ignore', 'pipe', 'pipe'] });
   } catch (e) { out = (e.stdout || '') + (e.stderr || '') + '\n' + e.message; }
   const miss = checks.filter(re => !re.test(out));
   if (miss.length) {
