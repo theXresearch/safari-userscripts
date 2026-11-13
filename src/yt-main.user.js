@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YT Main
 // @namespace    https://github.com/theXresearch/safari-userscripts
-// @version      2026.11.12.7
+// @version      2026.11.12.8
 // @author       theXresearch
 // @updateURL    https://raw.githubusercontent.com/theXresearch/safari-userscripts/main/src/yt-main.meta.js
 // @downloadURL  https://raw.githubusercontent.com/theXresearch/safari-userscripts/main/src/yt-main.user.js
@@ -41,7 +41,7 @@
   const loadJson = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) || d; } catch (e) { return d; } };
 
   // ================= 설정 (⚙ 버튼으로 켜고 끔, yt-page도 같은 값을 읽음) =================
-  const VERSION = '2026.11.12.7';   // 위 @version과 같게 (⚙ 작동 상태에 표시)
+  const VERSION = '2026.11.12.8';   // 위 @version과 같게 (⚙ 작동 상태에 표시)
   const SET = Object.assign({ prune: true, origAudio: true, sb: true, chanSpeed: true, fresh: true, rest: true, tidy: true, endCards: true,
     shortsNormal: false, swipeBack: true, capLang: '', sbCats: SB_ALL.filter(c => c[2]).map(c => c[0]) }, loadJson('krSet', {}));
   const saveSet = () => localStorage.setItem('krSet', JSON.stringify(SET));
@@ -677,7 +677,7 @@
     // 영상이 끝나거나 다른 영상으로 바뀌면 원래 자리로 되돌림 → 사이트가 다음 영상을 정상적으로 이어서 재생
     ['ended', 'emptied'].forEach(ev => document.addEventListener(ev, e => { if (e.target === vid) exit(); }, true));
     return { enter, exit, video: () => vid };
-  })('kr-fs', v => cmd('play', v), () => showFsBar(),          // YouTube: 한 번 탭 = 조작 막대 보이기
+  })('kr-fs', v => cmd('play', v), v => { if (!nativeFs(v)) showFsBar(); },   // YouTube: 한 번 탭 = 조작 막대 보이기 (주소창이 가리면 iPhone 전체화면)
      (e, v) => {                                                   // 두 번 탭: 화면 왼쪽 1/3 = 10초 뒤로, 오른쪽 1/3 = 10초 앞으로
        const side = e.clientX < innerWidth / 3 ? -10 : e.clientX > innerWidth * 2 / 3 ? 10 : 0;
        if (!side) return;
@@ -686,10 +686,20 @@
      });
 
   const landscape = matchMedia('(orientation: landscape)');
+  // 가로 화면에서 Safari 주소창·탭 줄이 남아 영상을 가리는 경우 (Safari 막대는 페이지가 숨길 수 없음):
+  // 영상을 한 번 탭하면 iPhone 기본 전체화면으로 → 화면 전체를 영상이 씀 (손가락 탭이 있어야만 열 수 있음)
+  const chromeShown = () => innerHeight < Math.min(screen.width, screen.height) - 8;
+  function nativeFs(v) {
+    if (!v || !landscape.matches || !chromeShown() || !v.webkitEnterFullscreen || v.webkitDisplayingFullscreen) return false;
+    try { v.webkitEnterFullscreen(); return true; } catch (e) { return false; }
+  }
   const updateFs = v => {
     const want = landscape.matches && !isShorts() && !!vidId() && !!v;
     // 재생 준비된 영상만 전체화면으로 (끝난 영상은 다음 영상이 로드된 뒤 다시 들어감)
-    if (want && pseudoFs.video() !== v && !v.ended && v.readyState >= 2) { pseudoFs.exit(); pseudoFs.enter(v); }
+    if (want && pseudoFs.video() !== v && !v.ended && v.readyState >= 2) {
+      pseudoFs.exit(); pseudoFs.enter(v);
+      setTimeout(() => { if (pseudoFs.video() && chromeShown()) fsGest.hud('영상을 탭하면 전체화면'); }, 700);
+    }
     else if (!want && pseudoFs.video()) pseudoFs.exit();
   };
   landscape.addEventListener('change', () => updateFs(pseudoFs.video() || document.querySelector('video')));

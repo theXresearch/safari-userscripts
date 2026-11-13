@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Web Main
 // @namespace    https://github.com/theXresearch/safari-userscripts
-// @version      2026.11.12.7
+// @version      2026.11.12.8
 // @author       theXresearch
 // @updateURL    https://raw.githubusercontent.com/theXresearch/safari-userscripts/main/src/web-main.meta.js
 // @downloadURL  https://raw.githubusercontent.com/theXresearch/safari-userscripts/main/src/web-main.user.js
@@ -25,7 +25,7 @@
   const NO_DARK = [];
 
   // ================= 설정 (영상 버튼 줄·🚫 줄의 ⚙, 모든 사이트 공통) =================
-  const VERSION = '2026.11.12.7';
+  const VERSION = '2026.11.12.8';
   const SET = { dark: true, copyFix: true, autoFs: true, pauseHidden: true };
   const SET_ITEMS = [
     ['dark', '다크 모드', 'iPhone이 다크 모드일 때 밝은 사이트를 어둡게'],
@@ -609,7 +609,14 @@
     // 두 번 탭을 따로 처리했을 때, 첫 탭이 예약한 '한 번 탭' 동작(조작 화면 표시) 취소
     const cancelTap = () => { clearTimeout(tapTimer); tapTimer = 0; };
     return { enter, exit, cancelTap, video: () => vid };
-  })('kw-fs', v => v.play().catch(() => {}), () => toggleFsUi());   // 한 번 탭 = 조작 화면 보이기/숨기기
+  })('kw-fs', v => v.play().catch(() => {}), v => { if (!nativeFs(v)) toggleFsUi(); });   // 한 번 탭 = 조작 화면 보이기/숨기기 (주소창이 가리면 iPhone 전체화면)
+  // 가로 화면에서 Safari 주소창·탭 줄이 남아 영상을 가리는 경우 (페이지가 숨길 수 없음):
+  // 영상을 한 번 탭하면 iPhone 기본 전체화면으로 (손가락 탭이 있어야만 열 수 있음)
+  const chromeShown = () => innerHeight < Math.min(screen.width, screen.height) - 8;
+  function nativeFs(v) {
+    if (!v || !(innerWidth > innerHeight) || !chromeShown() || !v.webkitEnterFullscreen || v.webkitDisplayingFullscreen) return false;
+    try { v.webkitEnterFullscreen(); return true; } catch (e) { return false; }
+  }
 
   let lastTapAt = 0, lastX = 0, lastY = 0;
   const toggleFs = v => {
@@ -657,6 +664,7 @@
       const v = activeVideo();
       if (!pseudoFs.video() && v && !v.paused && v.videoWidth >= 400) {   // 재생 중인 본 영상만 (작은 광고 영상 제외)
         resetZoom(); pseudoFs.enter(v); autoFs = true; setTimeout(updateVideos, 50);
+        setTimeout(() => { if (pseudoFs.video() && chromeShown()) fsGest.hud('영상을 탭하면 전체화면'); }, 700);
       }
     } else if (!wide && autoFs) {
       autoFs = false;
